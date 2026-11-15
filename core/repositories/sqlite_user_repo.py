@@ -26,10 +26,7 @@ class SqliteUserRepository(AbstractUserRepository):
         return conn
 
     def _row_to_user(self, row: sqlite3.Row) -> Optional[User]:
-        """
-        [已修正] 将数据库行安全地转换为 User 对象。
-        现在可以正确读取所有新旧字段。
-        """
+        """将数据库行转换为用户领域模型。"""
         if not row:
             return None
             
@@ -49,7 +46,6 @@ class SqliteUserRepository(AbstractUserRepository):
                             return None
             return None
         
-        # 使用 .keys() 检查字段是否存在，确保向后兼容性
         row_keys = row.keys()
         
         return User(
@@ -71,37 +67,13 @@ class SqliteUserRepository(AbstractUserRepository):
             current_bait_id=row["current_bait_id"],
             bait_start_time=parse_datetime(row["bait_start_time"]),
 
-            max_wipe_bomb_multiplier=row["max_wipe_bomb_multiplier"] if "max_wipe_bomb_multiplier" in row_keys else 0.0,
-            min_wipe_bomb_multiplier=row["min_wipe_bomb_multiplier"] if "min_wipe_bomb_multiplier" in row_keys else None,
-
             auto_fishing_enabled=bool(row["auto_fishing_enabled"]),
             last_fishing_time=parse_datetime(row["last_fishing_time"]),
-            last_wipe_bomb_time=parse_datetime(row["last_wipe_bomb_time"]),
             last_steal_time=parse_datetime(row["last_steal_time"]),
             last_electric_fish_time=parse_datetime(row["last_electric_fish_time"]) if "last_electric_fish_time" in row_keys else None,
             last_login_time=parse_datetime(row["last_login_time"]),
             last_stolen_at=parse_datetime(row["last_stolen_at"]),
-            wipe_bomb_forecast=row["wipe_bomb_forecast"],
             fishing_zone_id=row["fishing_zone_id"],
-
-            # ==================== 在这里添加新字段 ====================
-            wipe_bomb_attempts_today=row["wipe_bomb_attempts_today"] if "wipe_bomb_attempts_today" in row_keys else 0,
-            last_wipe_bomb_date=row["last_wipe_bomb_date"] if "last_wipe_bomb_date" in row_keys else None,
-            # =========================================================
-
-            # --- [关键修复] 添加所有命运之轮字段的读取 ---
-            in_wheel_of_fate=bool(row["in_wheel_of_fate"]) if "in_wheel_of_fate" in row_keys else False,
-            wof_current_level=row["wof_current_level"] if "wof_current_level" in row_keys else 0,
-            wof_current_prize=row["wof_current_prize"] if "wof_current_prize" in row_keys else 0,
-            wof_entry_fee=row["wof_entry_fee"] if "wof_entry_fee" in row_keys else 0,
-            last_wof_play_time=parse_datetime(row["last_wof_play_time"]) if "last_wof_play_time" in row_keys else None,
-            wof_last_action_time=parse_datetime(row["wof_last_action_time"]) if "wof_last_action_time" in row_keys else None,
-            wof_plays_today=row["wof_plays_today"] if "wof_plays_today" in row_keys else 0,
-            last_wof_date=row["last_wof_date"] if "last_wof_date" in row_keys else None,
-            # --- [新功能] 添加骰宝冷却字段的读取 ---
-            last_sicbo_time=parse_datetime(row["last_sicbo_time"]) if "last_sicbo_time" in row_keys else None,
-            
-            # --- [新功能] 添加交易所账户状态字段的读取 ---
             exchange_account_status=bool(row["exchange_account_status"]) if "exchange_account_status" in row_keys else False,
         )
 

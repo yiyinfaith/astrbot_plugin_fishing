@@ -8,10 +8,10 @@ from datetime import date, datetime
 from ..domain.models import (
     User, Fish, Rod, Bait, Accessory, Title, Achievement, Item,
     UserRodInstance, UserAccessoryInstance, UserFishInventoryItem, UserAquariumItem,
-    FishingRecord, GachaRecord, WipeBombLog, MarketListing, TaxRecord,
+    FishingRecord, GachaRecord, MarketListing, TaxRecord,
     GachaPool, GachaPoolItem, FishingZone, UserBuff, AquariumUpgrade,
     ShopOffer, ShopOfferCost, ShopOfferReward,
-    Commodity, Exchange, UserCommodity  # 新增交易所模型导入
+    Commodity, Exchange, UserCommodity, UserFishStat  # 新增交易所模型导入
 )
 
 # 定义用户成就进度的数据结构
@@ -485,12 +485,6 @@ class AbstractLogRepository(ABC):
     # 获取用户抽卡日志
     @abstractmethod
     def get_gacha_records(self, user_id: str, limit: int) -> List[GachaRecord]: pass
-    # 记录一条擦弹日志
-    @abstractmethod
-    def add_wipe_bomb_log(self, log: WipeBombLog) -> None: pass
-    # 获取用户今日擦弹次数
-    @abstractmethod
-    def get_wipe_bomb_log_count_today(self, user_id: str) -> int: pass
     # 记录一条签到日志
     @abstractmethod
     def add_check_in(self, user_id: str, check_in_date: date) -> None: pass
@@ -500,21 +494,12 @@ class AbstractLogRepository(ABC):
     # 记录一条税收日志
     @abstractmethod
     def add_tax_record(self, record: TaxRecord) -> None: pass
-    # 获取用户的擦弹历史
-    @abstractmethod
-    def get_wipe_bomb_logs(self, user_id: str, limit: int = 10) -> List[WipeBombLog]: pass
     # 获取用户的税收历史
     @abstractmethod
     def get_tax_records(self, user_id: str, limit: int = 10) -> List[TaxRecord]: pass
     # 检查某个用户今天是否已经被征收过每日资产税
     @abstractmethod
     def has_user_daily_tax_today(self, user_id: str, reset_hour: int = 0) -> bool: pass
-    # 获取用户历史上最大的擦弹倍数
-    @abstractmethod
-    def get_max_wipe_bomb_multiplier(self, user_id: str) -> float: pass
-    @abstractmethod
-    def get_min_wipe_bomb_multiplier(self, user_id: str) -> Optional[float]: pass
-
     @abstractmethod
     def get_gacha_records_count_today(
         self, user_id: str, gacha_pool_id: int
@@ -561,9 +546,6 @@ class AbstractAchievementRepository(ABC):
     # 检查是否钓到过超过特定重量的鱼
     @abstractmethod
     def has_caught_heavy_fish(self, user_id: str, weight: int) -> bool: pass
-    # 检查擦弹是否达到过特定倍率
-    @abstractmethod
-    def has_wipe_bomb_multiplier(self, user_id: str, multiplier: float) -> bool: pass
     # 检查用户是否拥有特定稀有度的物品
     @abstractmethod
     def has_item_of_rarity(self, user_id: str, item_type: str, rarity: int) -> bool: pass

@@ -246,162 +246,9 @@ class SqliteRedPacketRepository:
             """, (group_id,))
             return [self._row_to_red_packet(row) for row in cursor.fetchall()]
 
-    def revoke_group_red_packets(self, group_id: str) -> tuple[int, int, list]:
-        """
-        撤回指定群组的所有未领完红包，并返回退款信息
-        
-        Returns:
-            (退还的红包数量, 退还的总金额, 红包详情列表)
-        """
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            
-            # 获取该群所有未领完的红包
-            cursor.execute("""
-                SELECT packet_id, sender_id, remaining_amount 
-                FROM red_packets 
-                WHERE group_id = ? AND is_expired = 0 AND remaining_amount > 0
-            """, (group_id,))
-            
-            packets_to_revoke = cursor.fetchall()
-            
-            if not packets_to_revoke:
-                return (0, 0, [])
-            
-            # 标记这些红包为已过期
-            packet_ids = [p[0] for p in packets_to_revoke]
-            placeholders = ','.join('?' * len(packet_ids))
-            cursor.execute(f"""
-                UPDATE red_packets 
-                SET is_expired = 1, remaining_count = 0, remaining_amount = 0
-                WHERE packet_id IN ({placeholders})
-            """, packet_ids)
-            
-            conn.commit()
-            
-            # 计算退还信息
-            refund_count = len(packets_to_revoke)
-            refund_amount = sum(p[2] for p in packets_to_revoke)
-            
-            return (refund_count, refund_amount, packets_to_revoke)
-
-    def revoke_all_red_packets(self) -> tuple[int, int, list]:
-        """
-        撤回所有未领完的红包，并返回退款信息
-        
-        Returns:
-            (退还的红包数量, 退还的总金额, 红包详情列表)
-        """
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            
-            # 获取所有未领完的红包
-            cursor.execute("""
-                SELECT packet_id, sender_id, remaining_amount 
-                FROM red_packets 
-                WHERE is_expired = 0 AND remaining_amount > 0
-            """)
-            
-            packets_to_revoke = cursor.fetchall()
-            
-            if not packets_to_revoke:
-                return (0, 0, [])
-            
-            # 标记所有红包为已过期
-            cursor.execute("""
-                UPDATE red_packets 
-                SET is_expired = 1, remaining_count = 0, remaining_amount = 0
-                WHERE is_expired = 0 AND remaining_amount > 0
-            """)
-            
-            conn.commit()
-            
-            # 计算退还信息
-            refund_count = len(packets_to_revoke)
-            refund_amount = sum(p[2] for p in packets_to_revoke)
-            
-            return (refund_count, refund_amount, packets_to_revoke)
-
-    def delete_group_red_packets(self, group_id: str) -> int:
-        """
-        删除指定群组的所有红包记录
-        
-        Returns:
-            删除的红包数量
-        """
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            
-            # 获取该群所有红包ID
-            cursor.execute("""
-                SELECT packet_id FROM red_packets WHERE group_id = ?
-            """, (group_id,))
-            packet_ids = [row[0] for row in cursor.fetchall()]
-            
-            if not packet_ids:
-                return 0
-            
-            # 删除领取记录
-            placeholders = ','.join('?' * len(packet_ids))
-            cursor.execute(f"""
-                DELETE FROM red_packet_records 
-                WHERE packet_id IN ({placeholders})
-            """, packet_ids)
-            
-            # 删除红包
-            cursor.execute("""
-                DELETE FROM red_packets WHERE group_id = ?
-            """, (group_id,))
-            
-            # 检查是否还有红包记录
-            cursor.execute("SELECT COUNT(*) FROM red_packets")
-            remaining_count = cursor.fetchone()[0]
-            
-            # 如果没有红包记录了，重置自增ID
-            if remaining_count == 0:
-                cursor.execute("""
-                    DELETE FROM sqlite_sequence WHERE name = 'red_packets'
-                """)
-                logger.info("已重置红包ID计数器")
-            
-            conn.commit()
-            
-            return len(packet_ids)
-
-    def delete_all_red_packets(self) -> int:
-        """
-        删除所有红包记录并重置ID计数器
-        
-        Returns:
-            删除的红包数量
-        """
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            
-            # 获取红包总数
-            cursor.execute("SELECT COUNT(*) FROM red_packets")
-            count = cursor.fetchone()[0]
-            
-            # 删除所有领取记录
-            cursor.execute("DELETE FROM red_packet_records")
-            
-            # 删除所有红包
-            cursor.execute("DELETE FROM red_packets")
-            
-            # 重置自增ID计数器
-            cursor.execute("""
-                DELETE FROM sqlite_sequence WHERE name = 'red_packets'
-            """)
-            
-            conn.commit()
-            
-            logger.info(f"已删除 {count} 个红包记录并重置红包ID计数器")
-            
-            return count
-
     def cleanup_expired_red_packets(self) -> int:
         """
-        清理所有过期红包（已过期24小时以上的）
+        清理已过期24小时以上的红包及其领取记录。
         
         Returns:
             清理的红包数量
@@ -409,13 +256,24 @@ class SqliteRedPacketRepository:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             
-            # 查找过期红包（已过期24小时以上）
-            from datetime import datetime, timedelta
-            expired_time = datetime.now() - timedelta(hours=24)
+            # 先将已到期但仍标记为活跃的红包置为过期。
+            now = datetime.now()
+            cursor.execute(
+                """
+                UPDATE red_packets
+                SET is_expired = 1
+                WHERE expires_at < ? AND is_expired = 0
+                """,
+                (now,),
+            )
+
+            # 仅删除已经过期一段时间的记录，给领取记录和审计留出窗口。
+            from datetime import timedelta
+            expired_time = now - timedelta(hours=24)
             
             cursor.execute("""
-                SELECT id FROM red_packets
-                WHERE expired_at < ? AND status IN ('active', 'expired')
+                SELECT packet_id FROM red_packets
+                WHERE expires_at < ? AND is_expired = 1
             """, (expired_time,))
             
             expired_packets = cursor.fetchall()
@@ -428,11 +286,11 @@ class SqliteRedPacketRepository:
             placeholders = ','.join(['?'] * len(packet_ids))
             
             cursor.execute(f"""
-                DELETE FROM red_packet_records WHERE red_packet_id IN ({placeholders})
+                DELETE FROM red_packet_records WHERE packet_id IN ({placeholders})
             """, packet_ids)
             
             cursor.execute(f"""
-                DELETE FROM red_packets WHERE id IN ({placeholders})
+                DELETE FROM red_packets WHERE packet_id IN ({placeholders})
             """, packet_ids)
             
             conn.commit()

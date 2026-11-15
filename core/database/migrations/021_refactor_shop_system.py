@@ -1,5 +1,7 @@
 import sqlite3
 
+from astrbot.api import logger
+
 
 def up(cursor: sqlite3.Cursor):
     """
@@ -7,7 +9,6 @@ def up(cursor: sqlite3.Cursor):
     - shops: 商店表
     - shop_items: 商店商品表（包含成本、奖励、库存等信息）
     """
-    from astrbot.api import logger
     logger.info("正在执行 021_refactor_shop_system: 重构商店系统...")
 
     # 1. 创建 shops 表

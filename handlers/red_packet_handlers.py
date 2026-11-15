@@ -224,36 +224,3 @@ async def revoke_red_packet(plugin: "FishingPlugin", event: AstrMessageEvent):
     
     result = plugin.red_packet_service.revoke_red_packet(packet_id, user_id, is_admin)
     yield event.plain_result(result["message"])
-
-
-async def cleanup_red_packets(plugin: "FishingPlugin", event: AstrMessageEvent):
-    """
-    [管理员] 清理红包
-    用法：
-    /清理红包          - 清理当前群的所有红包并退回金额
-    /清理红包 所有     - 清理全局所有群的红包（需谨慎）
-    """
-    # 验证管理员权限（仅机器人管理员）
-    if not event.is_admin():
-        yield event.plain_result("❌ 此命令仅限机器人管理员使用")
-        return
-    
-    args = event.message_str.split()
-    
-    # 获取群组会话ID（与发红包时使用相同的格式）
-    group_id = _get_group_session_id(event)
-    
-    # 带参数"所有"：清理全局所有红包
-    if len(args) >= 2 and args[1] in ["所有", "all"]:
-        # 清理全局所有红包
-        result = plugin.red_packet_service.clean_all_red_packets()
-        yield event.plain_result(result["message"])
-        return
-    
-    # 不带参数：清理当前群的红包
-    if not group_id:
-        yield event.plain_result("❌ 此命令只能在群聊中使用\n提示：如需清理全局红包，请使用 /清理红包 所有")
-        return
-    
-    result = plugin.red_packet_service.clean_group_red_packets(group_id)
-    yield event.plain_result(result["message"])

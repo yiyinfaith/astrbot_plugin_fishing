@@ -135,15 +135,15 @@ class DataSetupService:
         # --- 填充抽卡池具体物品 ---
         # 检查是否已填充，避免重复
         if not self.gacha_repo.get_pool_items(1):
-            self.gacha_repo.add_pool_item(1, {"item_type": "rod", "item_id": 4, "quantity": 1, "weight": 10}) # 星辰钓者
-            self.gacha_repo.add_pool_item(1, {"item_type": "rod", "item_id": 5, "quantity": 1, "weight": 3}) # 海神之赐
-            self.gacha_repo.add_pool_item(1, {"item_type": "rod", "item_id": 3, "quantity": 1, "weight": 30}) # 碳素纤维竿
-            self.gacha_repo.add_pool_item(1, {"item_type": "coins", "item_id": 0, "quantity": 10000, "weight": 57})
+            self.gacha_repo.add_item_to_pool(1, {"item_full_id": "rod-4", "quantity": 1, "weight": 10}) # 星辰钓者
+            self.gacha_repo.add_item_to_pool(1, {"item_full_id": "rod-5", "quantity": 1, "weight": 3}) # 海神之赐
+            self.gacha_repo.add_item_to_pool(1, {"item_full_id": "rod-3", "quantity": 1, "weight": 30}) # 碳素纤维竿
+            self.gacha_repo.add_item_to_pool(1, {"item_full_id": "coins-0", "quantity": 10000, "weight": 57})
 
         if not self.gacha_repo.get_pool_items(2):
-            self.gacha_repo.add_pool_item(2, {"item_type": "accessory", "item_id": 4, "quantity": 1, "weight": 5}) # 海洋之心
-            self.gacha_repo.add_pool_item(2, {"item_type": "accessory", "item_id": 3, "quantity": 1, "weight": 15}) # 丰收号角
-            self.gacha_repo.add_pool_item(2, {"item_type": "coins", "item_id": 0, "quantity": 20000, "weight": 80})
+            self.gacha_repo.add_item_to_pool(2, {"item_full_id": "accessory-4", "quantity": 1, "weight": 5}) # 海洋之心
+            self.gacha_repo.add_item_to_pool(2, {"item_full_id": "accessory-3", "quantity": 1, "weight": 15}) # 丰收号角
+            self.gacha_repo.add_item_to_pool(2, {"item_full_id": "coins-0", "quantity": 20000, "weight": 80})
 
         # --- 填充初始商店 ---
         if not self.shop_repo.get_all_shops():

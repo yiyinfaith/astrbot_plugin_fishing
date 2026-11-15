@@ -125,12 +125,6 @@ class SqliteAchievementRepository(AbstractAchievementRepository):
             cursor.execute("SELECT 1 FROM fishing_records WHERE user_id = ? AND weight >= ? LIMIT 1", (user_id, weight))
             return cursor.fetchone() is not None
 
-    def has_wipe_bomb_multiplier(self, user_id: str, multiplier: float) -> bool:
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT 1 FROM wipe_bomb_log WHERE user_id = ? AND reward_multiplier >= ? LIMIT 1", (user_id, multiplier))
-            return cursor.fetchone() is not None
-
     def has_item_of_rarity(self, user_id: str, item_type: str, rarity: int) -> bool:
         query = ""
         if item_type == "rod":

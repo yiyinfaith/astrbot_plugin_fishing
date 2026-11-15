@@ -80,7 +80,7 @@ def up(cursor: sqlite3.Cursor):
             equipped_rod_instance_id INTEGER, equipped_accessory_instance_id INTEGER,
             current_bait_id INTEGER, bait_start_time DATETIME, current_title_id INTEGER,
             auto_fishing_enabled INTEGER DEFAULT 0, last_fishing_time DATETIME,
-            last_wipe_bomb_time DATETIME, last_steal_time DATETIME,
+            last_steal_time DATETIME,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP, last_login_time DATETIME,
             consecutive_login_days INTEGER DEFAULT 0, fish_pond_capacity INTEGER DEFAULT 480,
             last_stolen_at DATETIME
@@ -169,15 +169,6 @@ def up(cursor: sqlite3.Cursor):
     """)
 
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS wipe_bomb_log (
-            log_id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL,
-            contribution_amount INTEGER NOT NULL, reward_multiplier REAL NOT NULL,
-            reward_amount INTEGER NOT NULL, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
-        )
-    """)
-
-    cursor.execute("""
         CREATE TABLE IF NOT EXISTS check_ins (
             user_id TEXT NOT NULL, check_in_date DATE NOT NULL,
             PRIMARY KEY (user_id, check_in_date),
@@ -216,7 +207,6 @@ def up(cursor: sqlite3.Cursor):
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_titles_user ON user_titles(user_id)")
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_user_achievement_progress_user ON user_achievement_progress(user_id)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_wipe_bomb_log_user_time ON wipe_bomb_log(user_id, timestamp)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_fishing_records_user_time ON fishing_records(user_id, timestamp)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_fishing_records_fish_id ON fishing_records(fish_id)")
     cursor.execute(

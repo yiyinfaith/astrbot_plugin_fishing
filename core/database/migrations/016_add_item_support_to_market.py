@@ -1,5 +1,7 @@
 import sqlite3
 
+from astrbot.api import logger
+
 
 def get_default_value(column_name):
     """获取字段的默认值"""

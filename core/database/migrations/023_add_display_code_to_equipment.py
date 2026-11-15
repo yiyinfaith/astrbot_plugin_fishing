@@ -1,5 +1,7 @@
 import sqlite3
 
+from astrbot.api import logger
+
 
 def _to_base36(n: int) -> str:
     if n < 0:

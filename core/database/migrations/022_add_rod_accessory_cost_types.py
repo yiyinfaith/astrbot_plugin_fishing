@@ -7,7 +7,7 @@ def up(cursor: sqlite3.Cursor):
     """
     # 1. 删除现有的CHECK约束
     cursor.execute("PRAGMA table_info(shop_item_costs)")
-    columns = cursor.fetchall()
+    cursor.fetchall()
     
     # 2. 重新创建表，添加rod和accessory支持
     cursor.execute("""

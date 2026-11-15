@@ -255,7 +255,7 @@ async def shop(plugin: "FishingPlugin", event: AstrMessageEvent):
                             item_emoji = "🗺️"
                         elif "香" in item_name or "驱灵" in item_name:
                             item_emoji = "🕯️"
-                        elif "许可证" in item_name or "擦弹" in item_name:
+                        elif "许可证" in item_name:
                             item_emoji = "📋"
                         elif "符" in item_name or "符文" in item_name:
                             item_emoji = "🔮"
@@ -995,7 +995,7 @@ def _parse_market_code(code: str, market_service=None) -> int:
                     raise ValueError(f"未找到鱼竿ID {code} 对应的市场商品")
             else:
                 raise ValueError("无法解析鱼竿ID，请稍后重试")
-        except ValueError as e:
+        except ValueError:
             raise ValueError(f"无效的鱼竿ID: {code}")
     elif code.startswith("A") and len(code) > 1:
         # A开头的ID，需要根据实例ID查找市场ID
@@ -1011,7 +1011,7 @@ def _parse_market_code(code: str, market_service=None) -> int:
                     raise ValueError(f"未找到饰品ID {code} 对应的市场商品")
             else:
                 raise ValueError("无法解析饰品ID，请稍后重试")
-        except ValueError as e:
+        except ValueError:
             raise ValueError(f"无效的饰品ID: {code}")
     elif code.startswith("C") and len(code) > 1:
         # C开头的ID，需要根据实例ID查找市场ID
@@ -1027,7 +1027,7 @@ def _parse_market_code(code: str, market_service=None) -> int:
                     raise ValueError(f"未找到大宗商品ID {code} 对应的市场商品")
             else:
                 raise ValueError("无法解析大宗商品ID，请稍后重试")
-        except ValueError as e:
+        except ValueError:
             raise ValueError(f"无效的大宗商品ID: {code}")
     else:
         raise ValueError(

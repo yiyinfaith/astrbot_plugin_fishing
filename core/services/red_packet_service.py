@@ -460,93 +460,6 @@ class RedPacketService:
             "refund_amount": refund_amount
         }
 
-    def clean_group_red_packets(self, group_id: str) -> Dict[str, Any]:
-        """
-        清理指定群组的红包（撤回未领完的，删除所有记录）
-        
-        Args:
-            group_id: 群组ID
-        """
-        # 1. 先撤回所有未领完的红包并退款
-        refund_count, refund_amount, packets_info = self.red_packet_repo.revoke_group_red_packets(group_id)
-        
-        # 退款给发送者
-        refund_details = {}
-        for packet_id, sender_id, amount in packets_info:
-            sender = self.user_repo.get_by_id(sender_id)
-            if sender:
-                sender.coins += amount
-                self.user_repo.update(sender)
-                refund_details[sender_id] = refund_details.get(sender_id, 0) + amount
-        
-        # 2. 删除所有红包记录
-        deleted_count = self.red_packet_repo.delete_group_red_packets(group_id)
-        
-        message = f"✅ 群组红包清理完成！\n"
-        message += f"📦 退还红包：{refund_count} 个\n"
-        message += f"💰 退还总额：{refund_amount:,} 金币\n"
-        message += f"🗑️ 删除记录：{deleted_count} 个\n"
-        
-        if refund_details:
-            message += f"\n💵 退款明细：\n"
-            for sender_id, amount in list(refund_details.items())[:5]:
-                sender = self.user_repo.get_by_id(sender_id)
-                name = sender.nickname if sender and sender.nickname else sender_id
-                message += f"  • {name}：{amount:,} 金币\n"
-            if len(refund_details) > 5:
-                message += f"  • ... 还有 {len(refund_details) - 5} 人\n"
-        
-        logger.info(f"清理了群 {group_id} 的 {deleted_count} 个红包记录，退还 {refund_amount} 金币")
-        
-        return {
-            "success": True,
-            "message": message,
-            "deleted_count": deleted_count,
-            "refund_amount": refund_amount
-        }
-
-    def clean_all_red_packets(self) -> Dict[str, Any]:
-        """
-        清理所有红包（撤回未领完的，删除所有记录）
-        """
-        # 1. 先撤回所有未领完的红包并退款
-        refund_count, refund_amount, packets_info = self.red_packet_repo.revoke_all_red_packets()
-        
-        # 退款给发送者
-        refund_details = {}
-        for packet_id, sender_id, amount in packets_info:
-            sender = self.user_repo.get_by_id(sender_id)
-            if sender:
-                sender.coins += amount
-                self.user_repo.update(sender)
-                refund_details[sender_id] = refund_details.get(sender_id, 0) + amount
-        
-        # 2. 删除所有红包记录
-        deleted_count = self.red_packet_repo.delete_all_red_packets()
-        
-        message = f"✅ 全局红包清理完成！\n"
-        message += f"📦 退还红包：{refund_count} 个\n"
-        message += f"💰 退还总额：{refund_amount:,} 金币\n"
-        message += f"🗑️ 删除记录：{deleted_count} 个\n"
-        
-        if refund_details:
-            message += f"\n💵 退款明细：\n"
-            for sender_id, amount in list(refund_details.items())[:10]:
-                sender = self.user_repo.get_by_id(sender_id)
-                name = sender.nickname if sender and sender.nickname else sender_id
-                message += f"  • {name}：{amount:,} 金币\n"
-            if len(refund_details) > 10:
-                message += f"  • ... 还有 {len(refund_details) - 10} 人\n"
-        
-        logger.info(f"清理了所有 {deleted_count} 个红包记录，退还 {refund_amount} 金币")
-        
-        return {
-            "success": True,
-            "message": message,
-            "deleted_count": deleted_count,
-            "refund_amount": refund_amount
-        }
-
     def cleanup_expired_packets(self) -> int:
         """
         清理所有过期红包
@@ -554,11 +467,3 @@ class RedPacketService:
         """
         result = self.red_packet_repo.cleanup_expired_red_packets()
         return result
-
-    def cleanup_group_packets(self, group_id: str) -> int:
-        """
-        清理指定群组的所有红包
-        返回清理数量
-        """
-        result = self.clean_group_red_packets(group_id)
-        return result.get("deleted_count", 0)

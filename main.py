@@ -301,8 +301,8 @@ class FishingPlugin(Star):
         # 确保初始道具存在（在已有数据库上也可幂等执行）
         try:
             data_setup_service.create_initial_items()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.error(f"补充初始道具失败: {exc}")
 
         # 商店完全由后台管控，不再自动种子化
 
