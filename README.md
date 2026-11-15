@@ -21,7 +21,7 @@
 
 ## 面板管理
 
-插件不再启动独立端口、独立登录页或独立 Web 服务。登录 AstrBot 管理面板后打开同源地址：
+登录 AstrBot 管理面板后打开同源地址：
 
 `/api/plug/astrbot_plugin_fishing/ui`
 
