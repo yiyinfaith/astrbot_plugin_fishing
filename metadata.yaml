@@ -1,6 +1,18 @@
 ﻿name: astrbot_plugin_fishing
-display_name: Fishing Another!
-version: 2.4.7
-author: "xxlemon"
-description: "全新架构钓鱼插件！更多交互，多商店系统、交易所、品质系统、水族箱和Web管理（支持原版fishing存档继续游玩）"
-repo: https://github.com/xxlemon-io/astrbot_plugin_fishing
+display_name: 全能钓鱼
+desc: 轻量完整的 AstrBot 钓鱼游戏，包含钓鱼、背包、市场、商店、抽卡、红包与交易所。
+short_desc: 钓鱼、经济与社交玩法，管理功能内嵌 AstrBot 面板。
+version: 2.5.0
+author: "一吟Faith"
+logo: logo.png
+category: 娱乐
+repo: https://github.com/yiyinfaith/astrbot_plugin_fishing
+astrbot_version: ">=4.29.0,<5"
+support_platforms:
+  - aiocqhttp
+  - telegram
+  - discord
+  - lark
+  - dingtalk
+help: |
+  插件介绍及使用教程见README.md文件

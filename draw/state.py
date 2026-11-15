@@ -1,15 +1,11 @@
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, Any, Optional
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
-import requests
-from io import BytesIO
-import time
-import json
+from PIL import Image, ImageDraw, ImageFont
 from .utils import get_user_avatar
 from .styles import (
     COLOR_SUCCESS, COLOR_WARNING, COLOR_ERROR, COLOR_GOLD, COLOR_RARE,
-    COLOR_REFINE_RED, COLOR_REFINE_ORANGE, COLOR_CORNER, load_font
+    COLOR_REFINE_RED, COLOR_REFINE_ORANGE, COLOR_CORNER
 )
 from .text_utils import load_font_with_cjk_fallback, draw_text_smart
 
@@ -52,9 +48,7 @@ async def draw_state_image(user_data: Dict[str, Any], data_dir: str) -> Image.Im
             - total_fishing_count: 总钓鱼次数
             - steal_total_value: 偷鱼总价值 TODO
             - signed_in_today: 今日是否签到
-            - wipe_bomb_remaining: 擦弹剩余次数
             - electric_fish_cooldown_remaining: 电鱼剩余CD时间（秒）
-            - wof_remaining_plays: 命运之轮剩余次数
             - pond_info: 鱼塘信息
     Returns:
         PIL.Image.Image: 生成的状态图像
@@ -75,7 +69,7 @@ async def draw_state_image(user_data: Dict[str, Any], data_dir: str) -> Image.Im
         path = os.path.join(os.path.dirname(__file__), "resource", name)
         try:
             return ImageFont.truetype(path, size)
-        except Exception as e:
+        except Exception:
             return ImageFont.load_default()
 
     font_path = os.path.join(os.path.dirname(__file__), "resource", "DouyinSansBold.otf")
@@ -398,16 +392,6 @@ async def draw_state_image(user_data: Dict[str, Any], data_dir: str) -> Image.Im
         sign_color = error_color
     draw.text((status_col1_x, status_row1_y), sign_text, font=content_font, fill=sign_color)
 
-    # 右列第一行：擦弹次数
-    wipe_remaining = user_data.get('wipe_bomb_remaining', 0)
-    if wipe_remaining > 0:
-        wipe_text = f"擦弹次数: 剩余 {wipe_remaining} 次"
-        wipe_color = error_color
-    else:
-        wipe_text = "擦弹次数: 已用完"
-        wipe_color = text_muted
-    draw.text((status_col2_x, status_row1_y), wipe_text, font=content_font, fill=wipe_color)
-
     # 左列第二行：自动钓鱼状态
     auto_fishing = user_data.get('auto_fishing_enabled', False)
     if auto_fishing:
@@ -443,16 +427,6 @@ async def draw_state_image(user_data: Dict[str, Any], data_dir: str) -> Image.Im
         ef_cd_text = "准备好电鱼了！"
         ef_cd_color = error_color
     draw.text((status_col1_x, status_row3_y), ef_cd_text, font=content_font, fill=ef_cd_color)
-
-    # 第三行右列: 命运之轮
-    wof_rem = user_data.get('wof_remaining_plays', 0)
-    if wof_rem > 0:
-        wof_text = f"命运之轮: 剩余 {wof_rem} 次"
-        wof_color = error_color
-    else:
-        wof_text = "命运之轮: 已用完"
-        wof_color = text_muted
-    draw.text((status_col2_x, status_row3_y), wof_text, font=content_font, fill=wof_color)
 
     # 第四行：鱼塘信息
     pond_info = user_data.get('pond_info', {})
@@ -502,7 +476,7 @@ def get_user_state_data(user_repo, inventory_repo, item_template_repo, log_repo,
     Returns:
         包含用户状态信息的字典，如果用户不存在则返回None
     """
-    from ..core.utils import get_now, get_today
+    from ..core.utils import get_now
     
     # 获取用户基本信息
     user = user_repo.get_by_id(user_id)
@@ -620,7 +594,7 @@ def get_user_state_data(user_repo, inventory_repo, item_template_repo, log_repo,
                     'id': user.current_title_id,
                     'name': f"称号#{user.current_title_id}"
                 }
-        except:
+        except Exception:
             # 如果获取称号失败，忽略
             current_title = None
     
@@ -637,44 +611,6 @@ def get_user_state_data(user_repo, inventory_repo, item_template_repo, log_repo,
         today = get_now().date()
         last_login_date = user.last_login_time.date() if hasattr(user.last_login_time, 'date') else user.last_login_time
         signed_in_today = (last_login_date == today)
-    
-    # 计算擦弹剩余次数
-    wipe_bomb_remaining = 0
-    # 确保 user 对象有新添加的字段，做向后兼容
-    if hasattr(user, 'last_wipe_bomb_date') and hasattr(user, 'wipe_bomb_attempts_today'):
-        base_max_attempts = game_config.get("wipe_bomb", {}).get("max_attempts_per_day", 3)
-        extra_attempts = 0
-        boost_buff = buff_repo.get_active_by_user_and_type(user_id, "WIPE_BOMB_ATTEMPTS_BOOST")
-        if boost_buff and boost_buff.payload:
-            try:
-                extra_attempts = json.loads(boost_buff.payload).get("amount", 0)
-            except json.JSONDecodeError: pass
-        
-        total_max_attempts = base_max_attempts + extra_attempts
-        
-        today_str = get_today().strftime('%Y-%m-%d')
-        used_attempts_today = 0
-        # 如果记录的日期是今天，就使用记录的次数；否则次数为0
-        if user.last_wipe_bomb_date == today_str:
-            used_attempts_today = user.wipe_bomb_attempts_today
-
-        wipe_bomb_remaining = max(0, total_max_attempts - used_attempts_today)
-    else:
-        # 如果数据库中的用户数据还没有新字段（例如，尚未迁移），提供一个默认值
-        wipe_bomb_remaining = game_config.get("wipe_bomb", {}).get("max_attempts_per_day", 3)
-
-    # 计算命运之轮剩余次数
-    wheel_of_fate_daily_limit = game_config.get("wheel_of_fate_daily_limit", 3)
-    wof_remaining_plays = 0
-    if hasattr(user, 'last_wof_date') and hasattr(user, 'wof_plays_today'):
-        today_str = get_today().strftime('%Y-%m-%d')
-        if user.last_wof_date == today_str:
-            wof_remaining_plays = max(0, wheel_of_fate_daily_limit - user.wof_plays_today)
-        else:
-            wof_remaining_plays = wheel_of_fate_daily_limit
-    else:
-        # 兼容旧数据，给予最大次数
-        wof_remaining_plays = wheel_of_fate_daily_limit
     
     # 获取鱼塘信息
     pond_info = None
@@ -694,7 +630,7 @@ def get_user_state_data(user_repo, inventory_repo, item_template_repo, log_repo,
         else:
             pond_info = {'total_count': 0, 'total_value': 0}
             
-    except Exception as e:
+    except Exception:
         # 如果获取鱼塘信息失败，设置为默认值
         pond_info = {'total_count': 0, 'total_value': 0}
     
@@ -714,7 +650,5 @@ def get_user_state_data(user_repo, inventory_repo, item_template_repo, log_repo,
         'total_fishing_count': total_fishing_count,
         'steal_total_value': steal_total_value,
         'signed_in_today': signed_in_today,
-        'wipe_bomb_remaining': wipe_bomb_remaining,
         'pond_info': pond_info,
-        'wof_remaining_plays': wof_remaining_plays,
     }

@@ -1,7 +1,7 @@
 import math
 import os
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
-from .styles import COLOR_TITLE, COLOR_CMD, COLOR_LINE, COLOR_SHADOW, load_font
+from PIL import Image, ImageDraw
+from .styles import COLOR_TITLE, COLOR_CMD, COLOR_LINE, load_font
 
 
 def draw_help_image():
@@ -26,7 +26,6 @@ def draw_help_image():
     cmd_color = COLOR_CMD
     card_bg = (255, 255, 255)
     line_color = COLOR_LINE
-    shadow_color = COLOR_SHADOW
 
     # 4. 获取文本尺寸的辅助函数（测量版）
     _measure_img = Image.new('RGB', (10, 10), bg_bot)
@@ -169,30 +168,6 @@ def draw_help_image():
         ("十连 [卡池ID]", "进行十连抽卡"),
         ("查看卡池 [ID]", "查看卡池详情"),
         ("抽卡记录", "查看我的\n抽卡记录"),
-        ("擦弹 [金额]", "进行擦弹游戏\n(可填allin/halfin)"),
-        ("擦弹记录", "查看我的\n擦弹记录"),
-        ("命运之轮 [金额]", "挑战命运之轮\n连续10层"),
-        ("继续", "在命运之轮中\n继续下一层"),
-        ("放弃", "在命运之轮中\n放弃并结算"),
-    ]
-
-    sicbo = [
-        ("开庄", "玩家开启骰宝游戏\n倒计时60秒"),
-        ("鸭大 [金额]", "鸭大(11-17点)\n赔率1:1"),
-        ("鸭小 [金额]", "鸭小(4-10点)\n赔率1:1"),
-        ("鸭单 [金额]", "鸭单数\n赔率1:1"),
-        ("鸭双 [金额]", "鸭双数\n赔率1:1"),
-        ("鸭豹子 [金额]", "鸭三同\n赔率1:24"),
-        ("鸭一点 [金额]", "鸭骰子出现1\n动态赔率"),
-        ("鸭4点 [金额]", "鸭总点数4\n赔率1:50"),
-        ("鸭17点 [金额]", "鸭总点数17\n赔率1:50"),
-        ("骰宝状态", "查看游戏状态"),
-        ("我的下注", "查看下注情况"),
-        ("骰宝帮助", "查看详细规则"),
-        ("骰宝赔率", "查看完整\n赔率表"),
-        ("骰宝结算", "管理员强制\n结算当前游戏"),
-        ("骰宝倒计时 [秒数]", "管理员设置\n游戏倒计时(10-300秒)"),
-        ("骰宝模式 [模式]", "管理员设置\n消息模式(image/text)"),
     ]
 
     social = [
@@ -207,7 +182,7 @@ def draw_help_image():
         ("红包列表", "查看本群\n可领取红包"),
         ("红包详情 [ID]", "查看红包详情\n及领取记录"),
         ("撤回红包 [ID]", "撤回未领完红包\n退还剩余金币"),
-        ("清理红包 [所有]", "清理红包记录\n仅机器人管理员"),
+        ("清理红包", "过期红包由管理面板清理"),
         ("查看称号", "查看我拥有的称号"),
         ("使用称号 [ID]", "装备指定ID称号"),
         ("查看成就", "查看我的成就进度"),
@@ -225,28 +200,7 @@ def draw_help_image():
         ("清仓", "卖出所有库存"),
     ]
 
-    admin = [
-        ("修改金币 [用户ID] [数量]", "修改用户金币"),
-        ("奖励金币 [用户ID] [数量]", "奖励用户金币\n支持中文数字"),
-        ("扣除金币 [用户ID] [数量]", "扣除用户金币"),
-        ("修改高级货币 [用户ID] [数量]", "修改高级货币"),
-        ("奖励高级货币 [用户ID] [数量]", "奖励高级货币"),
-        ("扣除高级货币 [用户ID] [数量]", "扣除高级货币"),
-        ("全体奖励金币 [数量]", "给所有用户\n发放金币\n支持中文数字"),
-        ("全体奖励高级货币 [数量]", "给所有用户\n发放高级货币"),
-        ("全体扣除金币 [数量]", "从所有用户\n扣除金币"),
-        ("全体扣除高级货币 [数量]", "从所有用户\n扣除高级货币"),
-        ("全体发放道具 [道具ID] [数量]", "给所有用户\n发放指定道具"),
-        ("授予称号 [@用户/用户ID] [称号名称]", "授予用户称号"),
-        ("移除称号 [@用户/用户ID] [称号名称]", "移除用户称号"),
-        ("创建称号 [称号名称] [描述] [显示格式]", "创建自定义称号"),
-        ("补充鱼池", "重置所有钓鱼区域\n的稀有鱼剩余数量"),
-        ("开启钓鱼后台管理", "开启Web后台"),
-        ("关闭钓鱼后台管理", "关闭Web后台"),
-        ("代理上线 [用户ID]", "扮演指定用户\n进行操作"),
-        ("代理下线", "恢复为管理员身份"),
-        ("同步初始设定", "危！从初始数据文件\n同步数据"),
-    ]
+    admin = [("AstrBot 管理面板", "管理员操作统一在\n插件面板内完成")]
 
     # 10. 先计算自适应高度
     def section_delta(item_count: int, cols: int) -> int:
@@ -262,7 +216,6 @@ def draw_help_image():
     y0_est += section_delta(len(inventory), 3)
     y0_est += section_delta(len(market), 3)
     y0_est += section_delta(len(gacha), 3)
-    y0_est += section_delta(len(sicbo), 3)
     y0_est += section_delta(len(social), 2)
     y0_est += section_delta(len(exchange), 2)
     y0_est += section_delta(len(admin), 2)
@@ -285,7 +238,7 @@ def draw_help_image():
         output.paste(logo, (0, 0))
         output.putalpha(mask)
         image.paste(output, (logo_x, logo_y), output)
-    except Exception as e:
+    except Exception:
         # 如果没有logo文件，绘制一个圆角占位符
         draw.rounded_rectangle((logo_x, logo_y, logo_x + logo_size, logo_y + logo_size),
                                20, fill=bg_top, outline=(180, 180, 180), width=2)
@@ -305,10 +258,9 @@ def draw_help_image():
     y0 = draw_section("🎒 背包与资产管理", inventory, y0, cols=3)
     y0 = draw_section("🛒 商店与市场", market, y0, cols=3)
     y0 = draw_section("🎰 抽卡与概率玩法", gacha, y0, cols=3)
-    y0 = draw_section("🎲 骰宝游戏", sicbo, y0, cols=3)
     y0 = draw_section("👥 社交功能", social, y0, cols=2)
     y0 = draw_section("📈 大宗商品交易所", exchange, y0, cols=2)
-    y0 = draw_section("⚙️ 管理后台（管理员）", admin, y0, cols=2)
+    y0 = draw_section("⚙️ AstrBot 管理面板", admin, y0, cols=2)
 
     # 添加底部信息
     footer_y = y0 + 20
