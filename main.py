@@ -3,7 +3,7 @@ import asyncio
 
 from astrbot.api import logger, AstrBotConfig
 from astrbot.api.event import AstrMessageEvent, filter
-from astrbot.api.star import Context, Star
+from astrbot.api.star import Context, Star, StarTools
 
 # ==========================================================
 # 导入所有仓储层 & 服务层（与旧版保持一致的精确导入）
@@ -76,7 +76,7 @@ class FishingPlugin(Star):
         self.plugin_id = "astrbot_plugin_fishing"
 
         # --- 1.1. 数据与临时文件路径管理 ---
-        self.data_dir = self.context.get_data_dir(self.plugin_id)
+        self.data_dir = str(StarTools.get_data_dir(self.plugin_id))
         
         self.tmp_dir = os.path.join(self.data_dir, "tmp")
         os.makedirs(self.tmp_dir, exist_ok=True)
