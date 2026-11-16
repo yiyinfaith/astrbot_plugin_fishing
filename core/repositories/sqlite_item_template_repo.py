@@ -6,6 +6,13 @@ from typing import Optional, List, Dict, Any
 from .abstract_repository import AbstractItemTemplateRepository
 from ..domain.models import Fish, Rod, Bait, Accessory, Title, Item
 
+
+def _cooldown_modifier(data: Dict[str, Any]) -> float:
+    """饰品的钓鱼冷却倍率，未填写时为 1（不影响冷却）。"""
+    value = data.get("cooldown_modifier")
+    return 1.0 if value in (None, "") else float(value)
+
+
 class SqliteItemTemplateRepository(AbstractItemTemplateRepository):
     """物品模板仓储的SQLite实现"""
 
@@ -420,11 +427,11 @@ class SqliteItemTemplateRepository(AbstractItemTemplateRepository):
             cursor.execute("""
                 INSERT INTO accessories (name, description, rarity, slot_type, bonus_fish_quality_modifier,
                                          bonus_fish_quantity_modifier, bonus_rare_fish_chance,
-                                         bonus_coin_modifier, other_bonus_description, icon_url)
+                                         bonus_coin_modifier, other_bonus_description, icon_url, cooldown_modifier)
                 VALUES (:name, :description, :rarity, :slot_type, :bonus_fish_quality_modifier,
                         :bonus_fish_quantity_modifier, :bonus_rare_fish_chance, :bonus_coin_modifier,
-                        :other_bonus_description, :icon_url)
-            """, {**data, "icon_url": data.get("icon_url")})
+                        :other_bonus_description, :icon_url, :cooldown_modifier)
+            """, {**data, "icon_url": data.get("icon_url"), "cooldown_modifier": _cooldown_modifier(data)})
             conn.commit()
 
     def update_accessory_template(self, accessory_id: int, data: Dict[str, Any]) -> None:
@@ -438,9 +445,10 @@ class SqliteItemTemplateRepository(AbstractItemTemplateRepository):
                     bonus_fish_quantity_modifier = :bonus_fish_quantity_modifier,
                     bonus_rare_fish_chance = :bonus_rare_fish_chance,
                     bonus_coin_modifier = :bonus_coin_modifier,
-                    other_bonus_description = :other_bonus_description, icon_url = :icon_url
+                    other_bonus_description = :other_bonus_description, icon_url = :icon_url,
+                    cooldown_modifier = :cooldown_modifier
                 WHERE accessory_id = :accessory_id
-            """, {**data, "icon_url": data.get("icon_url")})
+            """, {**data, "icon_url": data.get("icon_url"), "cooldown_modifier": _cooldown_modifier(data)})
             conn.commit()
 
     def delete_accessory_template(self, accessory_id: int) -> None:

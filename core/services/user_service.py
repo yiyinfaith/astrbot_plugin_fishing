@@ -169,10 +169,8 @@ class UserService:
         max_reward = signin_config.get("max_reward", 300)
         coins_reward = random.randint(min_reward, max_reward)
 
-        # 1. 增加金币和高级货币
-        premium_currency_reward = 1
+        # 1. 增加金币
         user.coins += coins_reward
-        user.premium_currency += premium_currency_reward 
 
         # 2. 更新连续签到和最后登录时间
         user.consecutive_login_days += 1
@@ -187,14 +185,15 @@ class UserService:
         self.user_repo.update(user)
         self.log_repo.add_check_in(user_id, today)
 
-        # 3. 构建包含两种奖励的消息
-        message = f"签到成功！获得 {coins_reward} 金币和 {premium_currency_reward} 高级货币。"
+        # 3. 构建奖励消息
+        message = f"签到成功！获得 {coins_reward} 金币。"
         if bonus_coins > 0:
             message += f" 连续签到 {user.consecutive_login_days} 天，额外奖励 {bonus_coins} 金币！"
 
         free_gacha_reward_msg = ""
         free_pool = self.gacha_service.get_daily_free_pool()
-        if free_pool:
+        # 每日补给池没有内容时不抽，也不提示
+        if free_pool and self.gacha_service.gacha_repo.get_pool_items(free_pool.gacha_pool_id):
             gacha_result = self.gacha_service.perform_draw(user.user_id, free_pool.gacha_pool_id, 1)
             if gacha_result.get("success"):
                 reward = gacha_result.get("results", [])[0]

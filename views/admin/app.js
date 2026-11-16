@@ -297,7 +297,6 @@ function overviewView() {
         <button type="button" class="btn tonal" data-action="goto" data-tab="users">${icon('users')}管理玩家</button>
         <button type="button" class="btn tonal" data-action="broadcast-currency">全体发放金币</button>
         <button type="button" class="btn tonal" data-action="broadcast-item">全体发放物品</button>
-        <button type="button" class="btn tonal" data-action="replenish">补充鱼池</button>
       </div>
     </section>
   </div>`);
@@ -627,15 +626,15 @@ function zonesView() {
   const rows = (state.data.zones?.rows || []).map(z => {
     const dist = (z.configs?.rarity_distribution || []).map((v, i) => `${i < 5 ? i + 1 : '6+'}★ ${pct(v, 1)}`).join(' · ');
     const fish = z.specific_fish_ids?.length ? `${z.specific_fish_ids.length} 种：${z.specific_fish_ids.slice(0, 4).map(fishName).join('、')}${z.specific_fish_ids.length > 4 ? '…' : ''}` : '全局鱼池';
-    return `<tr><td>#${z.id}</td><td><strong>${esc(z.name)}</strong><span class="cell-sub">${esc(z.description || '')}</span></td><td>${yesNo(z.is_active, '开放', '关闭')}${z.available_from || z.available_until ? `<span class="cell-sub">${time(z.available_from)} ~ ${time(z.available_until)}</span>` : ''}</td><td class="num">${fmt(z.fishing_cost)}</td><td class="num">${fmt(z.rare_fish_caught_today)} / ${fmt(z.daily_rare_fish_quota)}</td><td class="wrap-text">${esc(dist)}<span class="cell-sub">${esc(fish)}</span></td><td>${z.requires_pass && z.required_item_id ? badge(itemName(z.required_item_id), 'warn') : badge('无需通行证', 'off')}</td><td>${rowActions([act('编辑', 'zone-edit', { id: z.id }), ...(z.id === 1 ? [] : [act('删除', 'zone-delete', { id: z.id, name: z.name }, true)])])}</td></tr>`;
+    return `<tr><td>#${z.id}</td><td><strong>${esc(z.name)}</strong><span class="cell-sub">${esc(z.description || '')}</span></td><td>${yesNo(z.is_active, '开放', '关闭')}${z.available_from || z.available_until ? `<span class="cell-sub">${time(z.available_from)} ~ ${time(z.available_until)}</span>` : ''}</td><td class="num">${fmt(z.fishing_cost)}</td><td class="num">${z.required_rod_rarity ? `${z.required_rod_rarity} 星` : '不限'}</td><td class="wrap-text">${esc(dist)}<span class="cell-sub">${esc(fish)}</span></td><td>${z.requires_pass && z.required_item_id ? badge(itemName(z.required_item_id), 'warn') : badge('无需通行证', 'off')}</td><td>${rowActions([act('编辑', 'zone-edit', { id: z.id }), ...(z.id === 1 ? [] : [act('删除', 'zone-delete', { id: z.id, name: z.name }, true)])])}</td></tr>`;
   });
-  return shell('钓鱼区域', '玩家用“钓鱼区域 ID”切换区域；稀有鱼（4 星及以上）受每日配额限制。', `<div class="panel">${table(['ID', '区域', '状态', { label: '单次消耗', cls: 'num' }, { label: '今日稀有鱼', cls: 'num' }, '稀有度分布 / 鱼池', '通行证', '操作'], rows, '还没有钓鱼区域。')}</div>`,
-  `<button type="button" class="btn text" data-action="replenish">补充鱼池</button><button type="button" class="btn primary" data-action="zone-create">${icon('plus')}新建区域</button>`);
+  return shell('钓鱼区域', '玩家用“钓鱼区域 ID”切换区域；通行证在进入时消耗 1 张，有效到下次每日刷新。', `<div class="panel">${table(['ID', '区域', '状态', { label: '单次消耗', cls: 'num' }, { label: '鱼竿要求', cls: 'num' }, '稀有度分布 / 鱼池', '通行证', '操作'], rows, '还没有钓鱼区域。')}</div>`,
+  `<button type="button" class="btn primary" data-action="zone-create">${icon('plus')}新建区域</button>`);
 }
 
 function zoneFormBody(z) {
   const isNew = !z;
-  z = z || { is_active: true, fishing_cost: 10, daily_rare_fish_quota: 0, configs: { rarity_distribution: [0.5, 0.3, 0.15, 0.04, 0.01, 0] }, specific_fish_ids: [] };
+  z = z || { is_active: true, fishing_cost: 10, required_rod_rarity: 0, configs: { rarity_distribution: [0.5, 0.3, 0.15, 0.04, 0.01, 0] }, specific_fish_ids: [] };
   const dist = [...(z.configs?.rarity_distribution || [])];
   while (dist.length < 6) dist.push(0);
   const selected = new Set(z.specific_fish_ids || []);
@@ -654,13 +653,13 @@ function zoneFormBody(z) {
     ${field({ name: 'name', label: '区域名称', value: z.name || '', required: true, cls: 'wide' })}
     ${field({ name: 'description', label: '描述', type: 'textarea', value: z.description || '', cls: 'full' })}
     ${field({ name: 'fishing_cost', label: '单次钓鱼消耗 (金币)', type: 'number', min: 1, value: z.fishing_cost ?? 10 })}
-    ${field({ name: 'daily_rare_fish_quota', label: '稀有鱼每日配额', type: 'number', min: 0, value: z.daily_rare_fish_quota ?? 0, hint: '0 表示不产出稀有鱼' })}
+    ${field({ name: 'required_rod_rarity', label: '鱼竿星级要求', type: 'number', min: 0, max: 10, value: z.required_rod_rarity ?? 0, hint: '装备的鱼竿达到这个星级才能进入和钓鱼，0 表示不限' })}
     ${switchField({ name: 'is_active', label: '开放区域', checked: z.is_active ?? true })}
     ${switchField({ name: 'limit_time', label: '限定开放时间', checked: limited })}
     ${field({ name: 'available_from', label: '开放时间', type: 'datetime-local', value: toLocalInput(z.available_from) })}
     ${field({ name: 'available_until', label: '结束时间', type: 'datetime-local', value: toLocalInput(z.available_until) })}
     ${switchField({ name: 'requires_pass', label: '需要通行证', checked: !!z.requires_pass })}
-    ${selectField({ name: 'required_item_id', label: '通行证道具', choices: passItems, value: z.required_item_id ?? '', cls: 'wide', hint: '进入区域时自动消耗' })}
+    ${selectField({ name: 'required_item_id', label: '通行证道具', choices: passItems, value: z.required_item_id ?? '', cls: 'wide', hint: '进入时消耗 1 个，每日刷新时自动再消耗 1 个续期' })}
   </div>
   <div class="modal-section">稀有度分布 <span class="hint" id="dist-sum"></span></div>
   <div class="form-grid three" data-dist>${dist.slice(0, 6).map((v, i) => field({ name: `rarity_${i}`, label: i < 5 ? `${i + 1} 星` : '6 星及以上', type: 'number', min: 0, max: 1, step: 'any', value: v })).join('')}</div>
@@ -800,7 +799,6 @@ function opsView() {
       <div class="panel"><h3>数据维护</h3>
         <div class="list-card">
           <div class="row"><div><h4>同步初始设定</h4><p>按插件内置数据补齐缺失的物品、商店与卡池，不会删除已有内容。</p></div><button type="button" class="btn tonal" data-action="sync">同步</button></div>
-          <div class="row"><div><h4>补充鱼池</h4><p>把所有区域今天已钓走的稀有鱼数量清零，配额恢复为满。</p></div><button type="button" class="btn tonal" data-action="replenish">补充</button></div>
         </div></div>
       <div class="panel"><h3>代理玩家</h3><p>开启后，该账号在聊天中发送的游戏指令会以目标玩家的身份执行。重载插件后自动失效。</p>
         <form data-form="imp-start" novalidate><div class="form-grid">${field({ name: 'admin_id', label: '你的账号 ID', required: true, placeholder: '例如你的 QQ 号' })}${field({ name: 'target_id', label: '目标玩家 ID', required: true })}</div><div class="form-actions" style="margin-top:16px"><button type="submit" class="btn primary">开始代理</button></div></form>
@@ -932,7 +930,6 @@ const ACTIONS = {
   'broadcast-currency': () => openBroadcastDialog('currency'),
   'broadcast-item': () => openBroadcastDialog('item'),
   sync: () => confirmAction({ title: '同步初始设定', message: '按插件内置数据补齐缺失的物品、商店与卡池吗？已有内容不会被删除。', label: '同步', danger: false, run: async () => { const r = await post('ops/sync'); await loadCatalog(); await refresh(); return r; } }),
-  replenish: () => confirmAction({ title: '补充鱼池', message: '把所有区域今天已钓走的稀有鱼数量清零吗？', label: '补充', danger: false, run: async () => { const r = await post('ops/replenish'); await refresh(); return r; } }),
   'imp-stop': b => confirmAction({ title: '结束代理', message: `结束账号 ${b.dataset.id} 的代理吗？`, label: '结束代理', run: async () => { const r = await post('ops/impersonation/stop', { admin_id: b.dataset.id }); await refresh(); return r; } }),
 };
 

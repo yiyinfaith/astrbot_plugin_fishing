@@ -20,13 +20,6 @@ def _normalize_now_for(lst_time):
     return now
 
 
-def _compute_cooldown_seconds(base_seconds, equipped_accessory):
-    """根据是否装备海洋之心动态计算冷却时间。"""
-    if equipped_accessory and equipped_accessory.get("name") == "海洋之心":
-        return base_seconds / 2
-    return base_seconds
-
-
 def _build_fish_message(result, fishing_cost):
     if result["success"]:
         fish = result['fish']
@@ -75,13 +68,8 @@ class FishingHandlers:
             return
         # 检查用户钓鱼CD
         lst_time = user.last_fishing_time
-        info = self.user_service.get_user_current_accessory(user_id)
-        if info["success"] is False:
-            yield event.plain_result(f"❌ 获取用户饰品信息失败：{info['message']}")
-            return
-        equipped_accessory = info.get("accessory")
-        base_cooldown = self.plugin.game_config["fishing"]["cooldown_seconds"]
-        cooldown_seconds = _compute_cooldown_seconds(base_cooldown, equipped_accessory)
+        # 饰品的冷却倍率（如海洋之心）在这里生效
+        cooldown_seconds = self.fishing_service.get_cooldown_seconds(user_id)
         # 修复时区问题
         now = _normalize_now_for(lst_time)
         if lst_time and (now - lst_time).total_seconds() < cooldown_seconds:
@@ -129,9 +117,11 @@ class FishingHandlers:
                 )
                 message += f"描述: {zone['description']}\n"
                 message += f"💰 钓鱼消耗: {zone.get('fishing_cost', 10)} 金币/次\n"
+                if zone.get("required_rod_rarity"):
+                    message += f"🎣 需要装备 {zone['required_rod_rarity']} 星及以上的鱼竿\n"
                 if zone.get("requires_pass"):
                     required_item_name = zone.get("required_item_name", "通行证")
-                    message += f"🔑 需要 {required_item_name} 才能进入\n"
+                    message += f"🔑 进入时消耗 1 个 {required_item_name}，有效到下次每日刷新\n"
                 if zone.get("available_from") or zone.get("available_until"):
                     message += "⏰ 开放时间: "
                     if zone.get("available_from") and zone.get("available_until"):
@@ -144,11 +134,6 @@ class FishingHandlers:
                     elif zone.get("available_until"):
                         until_time = zone["available_until"].strftime("%Y-%m-%d %H:%M")
                         message += f"至 {until_time} 结束\n"
-                remaining_rare = max(
-                    0, zone["daily_rare_fish_quota"] - zone["rare_fish_caught_today"]
-                )
-                if zone.get("daily_rare_fish_quota", 0) > 0:
-                    message += f"剩余稀有鱼类数量: {remaining_rare}\n"
                 message += "\n"
             message += "使用「/钓鱼区域 ID」命令切换钓鱼区域。\n"
             yield event.plain_result(message)

@@ -186,19 +186,21 @@ BAIT_DATA = [
 
 ROD_DATA = [
     # Format: (name, description, rarity, source, purchase_cost, quality_mod, quantity_mod, rare_mod, durability, icon_url)
-    ("新手木竿", "刚入门时的可靠伙伴", 1, "shop", 50, 1.0, 1.0, 0.0, None, None),
-    ("竹制鱼竿", "轻巧耐用", 2, "shop", 500, 1.0, 1.0, 0.01, None, None),
+    # 每钓上一次鱼消耗 1 点耐久，耐久用完后鱼竿自动卸下，精炼成功可回满
+    ("新手木竿", "刚入门时的可靠伙伴", 1, "shop", 50, 1.0, 1.0, 0.0, 200, None),
+    ("竹制鱼竿", "轻巧耐用", 2, "shop", 500, 1.0, 1.0, 0.01, 500, None),
     ("碳素纤维竿", "现代工艺的结晶", 3, "shop", 5000, 1.05, 1.0, 0.03, 1000, None),
-    ("星辰钓者", "蕴含星光力量的神秘鱼竿", 4, "gacha", None, 1.1, 1.0, 0.08, None, None),
-    ("海神之赐", "传说中海神波塞冬使用过的鱼竿", 5, "gacha", None, 1.2, 1.1, 0.15, None, None),
+    ("星辰钓者", "蕴含星光力量的神秘鱼竿", 4, "gacha", None, 1.1, 1.0, 0.08, 2000, None),
+    ("海神之赐", "传说中海神波塞冬使用过的鱼竿", 5, "gacha", None, 1.2, 1.1, 0.15, 3000, None),
 ]
 
 ACCESSORY_DATA = [
-    # Format: (name, description, rarity, slot_type, quality_mod, quantity_mod, rare_mod, coin_mod, other_desc, icon_url)
-    ("幸运四叶草", "带来好运的小饰品", 2, "general", 1.05, 1.0, 0.01, 1.02, None, None),
-    ("渔夫的戒指", "刻有古老符文的戒指", 3, "general", 1.0, 1.0, 0.0, 1.10, None, None),
-    ("丰收号角", "象征丰收的魔法号角", 4, "general", 1.10, 1.05, 0.03, 1.15, None, None),
-    ("海洋之心", "传说中的宝石，能与海洋生物沟通", 5, "general", 1.20, 1.10, 0.05, 1.25, "大幅减少钓鱼等待时间", None),
+    # Format: (name, description, rarity, slot_type, quality_mod, quantity_mod, rare_mod, coin_mod, other_desc, icon_url, cooldown_mod)
+    # cooldown_mod 是钓鱼冷却倍率，0.5 表示冷却时间减半
+    ("幸运四叶草", "带来好运的小饰品", 2, "general", 1.05, 1.0, 0.01, 1.02, None, None, 1.0),
+    ("渔夫的戒指", "刻有古老符文的戒指", 3, "general", 1.0, 1.0, 0.0, 1.10, None, None, 1.0),
+    ("丰收号角", "象征丰收的魔法号角", 4, "general", 1.10, 1.05, 0.03, 1.15, None, None, 1.0),
+    ("海洋之心", "传说中的宝石，能与海洋生物沟通", 5, "general", 1.20, 1.10, 0.05, 1.25, "钓鱼冷却时间减半", None, 0.5),
 ]
 
 TITLE_DATA = [
@@ -284,9 +286,9 @@ ITEM_DATA = [
     (
         0,
         "前往神秘海域的通行证",
-        "一张神秘的通行证，允许进入未知的神秘海域。",
+        "一张神秘的通行证，允许进入传说之海。",
         5,
-        "进入特定钓鱼区域时自动消耗。",
+        "进入传说之海时消耗 1 张，有效到下次每日刷新；刷新时仍在该海域会自动再消耗 1 张续期，没有通行证就回到新手港湾。",
         0,
         False,  # 设置为不可消耗
         None,
@@ -431,6 +433,30 @@ ITEM_DATA = [
 SHOP_DATA = [
     # Format: (shop_id, name, description, shop_type, is_active, start_time, end_time, sort_order)
     (1, "海鸥港杂货铺", "为水手们提供基础补给的杂货铺。", "normal", True, None, None, 100),
-    (2, "七海珍宝阁", "传闻中收藏着来自七个海洋的奇珍异宝。", "premium", True, None, None, 200),
-    (3, "幽灵船黑市", "一艘神出鬼没的幽灵船，只在特定的时间出现。", "limited", True, "1492-10-12 00:00:00", "1492-10-12 23:59:59", 300),
+    # 下面两个商店默认没有商品，先关闭，管理员上架商品后再在面板里开启
+    (2, "七海珍宝阁", "传闻中收藏着来自七个海洋的奇珍异宝。", "premium", False, None, None, 200),
+    (3, "幽灵船黑市", "一艘神出鬼没的幽灵船，只在特定的时间出现。", "limited", False, "1492-10-12 00:00:00", "1492-10-12 23:59:59", 300),
+]
+
+# 区域三「传说之海」的通行证
+ZONE_PASS_NAME = "前往神秘海域的通行证"
+# 通行证在海鸥港杂货铺的售价
+ZONE_PASS_PRICE = 20000
+
+# 抽卡池内容，物品按名称引用。格式: (卡池ID, 类型, 名称, 数量, 权重)，金币的名称为 None
+GACHA_POOL_ITEMS = [
+    (1, "rod", "星辰钓者", 1, 10),
+    (1, "rod", "海神之赐", 1, 3),
+    (1, "rod", "碳素纤维竿", 1, 30),
+    (1, "coins", None, 2000, 57),
+    (2, "accessory", "海洋之心", 1, 5),
+    (2, "accessory", "丰收号角", 1, 15),
+    (2, "coins", None, 4000, 80),
+    # 每日补给池：签到时自动抽一次
+    (3, "bait", "普通蚯蚓", 10, 30),
+    (3, "bait", "红虫", 5, 25),
+    (3, "bait", "活虾", 3, 15),
+    (3, "bait", "万能饵", 2, 15),
+    (3, "item", "幸运药水", 1, 10),
+    (3, "item", "便携式声呐", 1, 5),
 ]

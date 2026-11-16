@@ -69,6 +69,8 @@ class Accessory:
     bonus_coin_modifier: float = 1.0
     other_bonus_description: Optional[str] = None
     icon_url: Optional[str] = None
+    # 钓鱼冷却倍率，0.5 表示冷却时间减半
+    cooldown_modifier: float = 1.0
 
 @dataclass
 class Item:
@@ -295,10 +297,6 @@ class FishingZone:
     id: int
     name: str
     description: str
-    # 当天稀有鱼（4星及以上）的配额
-    daily_rare_fish_quota: int
-    # 今天已被钓走的稀有鱼数量
-    rare_fish_caught_today: int = 0
     # 区域的特定配置
     configs: Dict[str, Any] = field(default_factory=dict)
     is_active: bool = True
@@ -310,6 +308,8 @@ class FishingZone:
     requires_pass: bool = False  # 是否需要通行证
     # 钓鱼消耗相关字段
     fishing_cost: int = 10  # 在该区域钓鱼消耗的金币
+    # 进入和在该区域钓鱼需要装备的最低鱼竿星级，0 表示不限
+    required_rod_rarity: int = 0
 
     def __post_init__(self):
         if isinstance(self.is_active, int):

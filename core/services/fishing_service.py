@@ -20,6 +20,11 @@ from ..services.fishing_zone_service import FishingZoneService
 from .fish_weight_service import FishWeightService
 from ..utils import get_now, get_last_reset_time, calculate_after_refine
 
+# 抽中「6 星及以上」后各星级的相对权重，星级越高越难出；没列出的星级权重为 1
+HIGH_RARITY_WEIGHTS = {6: 15, 7: 4, 8: 1}
+# db_meta 里记录上次执行每日任务的刷新时间点
+DAILY_RESET_META_KEY = "daily_reset_at"
+
 
 class FishingService:
     """封装核心的钓鱼动作及后台任务"""
@@ -45,12 +50,12 @@ class FishingService:
         self.config = config
         # 获取每日刷新时间配置
         self.daily_reset_hour = self.config.get("daily_reset_hour", 0)
-        self.last_reset_time = get_last_reset_time(self.daily_reset_hour)
+        self.last_reset_time = self._load_last_reset_time()
         # 自动钓鱼线程相关属性
         self.auto_fishing_thread: Optional[threading.Thread] = None
         self.auto_fishing_running = False
         self._auto_fishing_stop_event = threading.Event()
-        self.rare_fish_reset_lock = threading.Lock()  # 防止稀有鱼重置并发执行的锁
+        self.daily_reset_lock = threading.Lock()  # 防止每日任务并发执行的锁
         # 可选的消息通知回调：签名 (target: str, message: str) -> None，用于消息通知
         self._notifier = None
         # 通知目标可配置，默认群聊。可由 config['notifications']['relocation_target'] 覆盖
@@ -130,9 +135,9 @@ class FishingService:
         Returns:
             一个包含结果的字典。
         """
-        # 在执行钓鱼前，先检查并执行每日重置（如果需要）
-        self._reset_rare_fish_daily_quota()
-        
+        # 在执行钓鱼前，先检查并执行每日任务（如果需要）
+        self._run_daily_tasks_if_due()
+
         user = self.user_repo.get_by_id(user_id)
         if not user:
             return {"success": False, "message": "用户不存在，无法钓鱼。"}
@@ -159,6 +164,10 @@ class FishingService:
             first_zone = self.inventory_repo.get_zone_by_id(1)
             first_zone_name = first_zone.name if first_zone else "初始区域"
             return {"success": False, "message": f"该钓鱼区域已于 {zone.available_until.strftime('%Y-%m-%d %H:%M')} 关闭，已自动传送回{first_zone_name}"}
+
+        rod_error = self._get_zone_rod_requirement_error(user_id, zone)
+        if rod_error:
+            return {"success": False, "message": rod_error, "zone_requirement_failed": True}
 
         if user.current_bait_id is not None:
             bait_template = self.item_template_repo.get_bait_by_id(user.current_bait_id)
@@ -332,25 +341,9 @@ class FishingService:
         # 4. 成功，生成渔获
         # 使用区域策略获取基础稀有度分布
         strategy = self.fishing_zone_service.get_strategy(user.fishing_zone_id)
-        rarity_distribution = strategy.get_fish_rarity_distribution(user)
-        
-        zone = self.inventory_repo.get_zone_by_id(user.fishing_zone_id)
-        is_rare_fish_available = zone.rare_fish_caught_today < zone.daily_rare_fish_quota
-        
-        if not is_rare_fish_available:
-            # 稀有鱼定义：4星及以上（包括5星和6+星组合）
-            # 若达到配额，屏蔽4星、5星和6+星概率，其它星级不受影响
-            if len(rarity_distribution) >= 4:
-                rarity_distribution[3] = 0.0  # 4星
-            if len(rarity_distribution) >= 5:
-                rarity_distribution[4] = 0.0  # 5星
-            if len(rarity_distribution) >= 6:
-                rarity_distribution[5] = 0.0  # 6+星
-            # 重新归一化概率分布
-            total = sum(rarity_distribution)
-            if total > 0:
-                rarity_distribution = [x / total for x in rarity_distribution]
-        
+        # 复制一份，避免改动策略里缓存的分布
+        rarity_distribution = list(strategy.get_fish_rarity_distribution(user))
+
         # 应用稀有度加成（rare_chance）调整分布权重
         # 如果玩家有装备/Buff/鱼饵提供的稀有度加成，会提升 4-5 星鱼的概率
         # 6+ 星鱼的概率不受影响，保持其作为"运气时刻"的设计
@@ -471,8 +464,6 @@ class FishingService:
             fishing_cost=fishing_cost,
             fish_pond_capacity=user.fish_pond_capacity,
             timestamp=settled_at,
-            zone_id=user.fishing_zone_id,
-            is_rare=fish_template.rarity >= 4,
             rod_instance_id=rod_instance_id,
             rod_durability=rod_durability,
             rod_broken=rod_broken,
@@ -606,8 +597,7 @@ class FishingService:
                 "zone_id": zone.id,
                 "name": zone.name,
                 "description": zone.description,
-                "daily_rare_fish_quota": zone.daily_rare_fish_quota,
-                "rare_fish_caught_today": zone.rare_fish_caught_today,
+                "required_rod_rarity": zone.required_rod_rarity or 0,
                 "whether_in_use": zone.id == user.fishing_zone_id,
                 "is_active": zone.is_active,
                 "requires_pass": zone.requires_pass,
@@ -735,17 +725,44 @@ class FishingService:
             fish_list = self.item_template_repo.get_all_fish()
         
         # 找出所有6星及以上的稀有度
-        high_rarities = set()
-        for fish in fish_list:
-            if fish.rarity >= 6:
-                high_rarities.add(fish.rarity)
-        
+        high_rarities = sorted({fish.rarity for fish in fish_list if fish.rarity >= 6})
+
         if not high_rarities:
             # 如果没有6星及以上的鱼，返回5星
             return 5
-            
-        # 从高稀有度中随机选择一个
-        return random.choice(list(high_rarities))
+
+        # 星级越高越难出
+        weights = [HIGH_RARITY_WEIGHTS.get(r, 1) for r in high_rarities]
+        return random.choices(high_rarities, weights=weights, k=1)[0]
+
+    def _get_zone_rod_requirement_error(self, user_id: str, zone: FishingZone) -> Optional[str]:
+        """检查玩家装备的鱼竿是否达到区域要求的星级。"""
+        required = getattr(zone, "required_rod_rarity", 0) or 0
+        if required <= 0:
+            return None
+        equipped_rod = self.inventory_repo.get_user_equipped_rod(user_id)
+        rod_template = self.item_template_repo.get_rod_by_id(equipped_rod.rod_id) if equipped_rod else None
+        if not rod_template:
+            return f"❌ 在{zone.name}钓鱼需要装备 {required} 星及以上的鱼竿，你当前没有装备鱼竿"
+        if rod_template.rarity < required:
+            return f"❌ 在{zone.name}钓鱼需要装备 {required} 星及以上的鱼竿，当前鱼竿【{rod_template.name}】是 {rod_template.rarity} 星"
+        return None
+
+    def get_cooldown_seconds(self, user_id: str, auto: bool = False) -> float:
+        """玩家的钓鱼冷却时间。饰品的冷却倍率会生效；自动钓鱼再按效率放慢。"""
+        fishing_config = self.config.get("fishing", {})
+        cooldown = float(fishing_config.get("cooldown_seconds", 180))
+        equipped_accessory = self.inventory_repo.get_user_equipped_accessory(user_id)
+        if equipped_accessory:
+            template = self.item_template_repo.get_accessory_by_id(equipped_accessory.accessory_id)
+            modifier = getattr(template, "cooldown_modifier", 1.0) if template else 1.0
+            if modifier is not None and modifier > 0:
+                cooldown *= modifier
+        if auto:
+            efficiency = fishing_config.get("auto_fishing_efficiency", 0.5)
+            efficiency = min(1.0, max(0.05, float(efficiency or 0.5)))
+            cooldown /= efficiency
+        return cooldown
 
     def set_user_fishing_zone(self, user_id: str, zone_id: int) -> Dict[str, Any]:
         """
@@ -777,6 +794,13 @@ class FishingService:
         
         if zone.available_until and now > zone.available_until:
             return {"success": False, "message": f"该钓鱼区域已于 {zone.available_until.strftime('%Y-%m-%d %H:%M')} 关闭"}
+
+        if zone.id == user.fishing_zone_id:
+            return {"success": False, "message": f"你已经在 {zone.name} 了"}
+
+        rod_error = self._get_zone_rod_requirement_error(user_id, zone)
+        if rod_error:
+            return {"success": False, "message": rod_error}
 
         # 检查通行证要求（从数据库读取）
         pass_consumed = False
@@ -812,25 +836,26 @@ class FishingService:
         # 构建成功消息
         success_message = f"✅已将钓鱼区域设置为 {zone.name}"
         if pass_consumed and consumed_item_name:
-            success_message += f"\n🔑 已消耗 1 个 {consumed_item_name}"
+            success_message += (
+                f"\n🔑 已消耗 1 个 {consumed_item_name}，有效到下次每日刷新。"
+                f"刷新时仍在这里会自动再消耗 1 个续期，没有就回到 1 号区域"
+            )
 
         return {"success": True, "message": success_message}
 
     def enforce_zone_pass_requirements_for_all_users(self) -> None:
         """
-        每日检查：若用户当前所在钓鱼区域需要通行证，但其背包中已无对应道具，
-        则将用户传送回 1 号钓鱼地，并通过群聊@通知相关玩家。
+        每日刷新时检查需要通行证的区域：玩家背包里还有通行证就自动消耗 1 张续期，
+        没有就送回 1 号区域。通行证在进入区域时已消耗 1 张，有效到下次刷新。
         """
         logger.info("开始执行每日区域通行证检查...")
         try:
             all_user_ids = self.user_repo.get_all_user_ids()
-            logger.info(f"找到 {len(all_user_ids)} 个用户需要检查")
         except Exception as e:
             logger.error(f"获取用户列表失败: {e}")
             return
 
-        relocated_users = []  # 存储被传送的用户信息
-
+        renewed, relocated = 0, 0
         for user_id in all_user_ids:
             try:
                 user = self.user_repo.get_by_id(user_id)
@@ -841,90 +866,72 @@ class FishingService:
                 if not zone or not getattr(zone, "requires_pass", False) or not getattr(zone, "required_item_id", None):
                     continue
 
+                item_template = self.item_template_repo.get_item_by_id(zone.required_item_id)
+                item_name = item_template.name if item_template else f"道具ID{zone.required_item_id}"
                 user_items = self.inventory_repo.get_user_item_inventory(user_id)
                 current_quantity = user_items.get(zone.required_item_id, 0) if user_items else 0
 
-                if current_quantity < 1:
-                    # 移动到 1 号区域
+                if current_quantity >= 1:
+                    self.inventory_repo.decrease_item_quantity(user_id, zone.required_item_id, 1)
+                    self.log_repo.add_log(user_id, "zone_renewal", f"自动消耗 1 个 {item_name}，继续留在 {zone.name}")
+                    renewed += 1
+                else:
                     user.fishing_zone_id = 1
                     self.user_repo.set_fishing_zone(user_id, 1)
-                    
-                    # 记录日志
-                    try:
-                        item_template = self.item_template_repo.get_item_by_id(zone.required_item_id)
-                        item_name = item_template.name if item_template else f"道具ID{zone.required_item_id}"
-                    except Exception:
-                        item_name = f"道具ID{zone.required_item_id}"
-                    self.log_repo.add_log(user_id, "zone_relocation", f"缺少 {item_name}，已被传送至 1 号钓鱼地")
-                    
-                    # 收集被传送用户信息
-                    relocated_users.append({
-                        "user_id": user_id,
-                        "nickname": user.nickname,
-                        "zone_name": zone.name,
-                        "item_name": item_name
-                    })
-                else:
-                    # 用户有道具，不需要重复扣除通行证
-                    # 通行证只在切换区域时扣除一次，这里只做检查
-                    try:
-                        item_template = self.item_template_repo.get_item_by_id(zone.required_item_id)
-                        item_name = item_template.name if item_template else f"道具ID{zone.required_item_id}"
-                    except Exception:
-                        item_name = f"道具ID{zone.required_item_id}"
-                    
-                    # 记录日志（不扣除道具）
-                    self.log_repo.add_log(user_id, "zone_access_check", f"检查 {item_name} 剩余数量：{current_quantity}，继续留在 {zone.name}")
-            except Exception:
+                    self.log_repo.add_log(user_id, "zone_relocation", f"没有 {item_name}，已回到 1 号钓鱼区域")
+                    relocated += 1
+            except Exception as e:
                 # 单个用户异常不影响其他用户
+                logger.error(f"检查用户 {user_id} 的区域通行证失败: {e}")
                 continue
 
-        # 记录检查结果
-        logger.info(f"每日检查完成：{len(relocated_users)} 个用户被传送（缺少通行证）")
-        
-        # 记录被传送用户信息（不发送通知，避免凌晨打扰玩家）
-        if relocated_users:
-            logger.info(f"被传送用户详情：{relocated_users}")
+        logger.info(f"每日通行证检查完成：{renewed} 人自动续期，{relocated} 人回到 1 号区域")
 
-    def _reset_rare_fish_daily_quota(self) -> bool:
+    def _load_last_reset_time(self):
+        """读取上次执行每日任务的刷新时间点；没有记录时视为当前时间点已执行。"""
+        current = get_last_reset_time(self.daily_reset_hour)
+        try:
+            saved = self.inventory_repo.get_meta(DAILY_RESET_META_KEY)
+        except Exception:
+            saved = None
+        if not saved:
+            self._save_last_reset_time(current)
+            return current
+        from datetime import datetime
+        try:
+            value = datetime.fromisoformat(saved)
+        except ValueError:
+            return current
+        if value.tzinfo is None and current.tzinfo is not None:
+            value = value.replace(tzinfo=current.tzinfo)
+        return value
+
+    def _save_last_reset_time(self, value) -> None:
+        try:
+            self.inventory_repo.set_meta(DAILY_RESET_META_KEY, value.isoformat())
+        except Exception as e:
+            logger.warning(f"记录每日刷新时间失败: {e}")
+
+    def _run_daily_tasks_if_due(self) -> bool:
         """
-        检查并重置所有区域的稀有鱼每日配额计数。
-        
-        使用快速路径检查模式优化性能：
-        1. 快速路径：无锁检查时间，如果不需要重置直接返回（99.9%的情况）
-        2. 慢速路径：加锁后再次确认（double-check），避免并发问题
-        
+        过了每日刷新时间点就执行一次每日任务（通行证续期）。
+        刷新时间点记在数据库里，插件重载或重启后也不会漏掉或重复执行。
+
         Returns:
-            bool: 如果执行了重置返回 True，否则返回 False
+            bool: 本次执行了每日任务返回 True
         """
-        # 快速路径：无锁检查，避免大多数情况下的锁竞争
         current_reset_time = get_last_reset_time(self.daily_reset_hour)
-        if current_reset_time == self.last_reset_time:
-            # 不需要重置，直接返回（99.9%的情况）
+        if current_reset_time <= self.last_reset_time:
             return False
-        
-        # 慢速路径：可能需要重置，获取锁后再次确认（double-check pattern）
-        with self.rare_fish_reset_lock:
-            # 再次检查，防止在获取锁的过程中其他线程已经执行了重置
-            current_reset_time = get_last_reset_time(self.daily_reset_hour)
-            if current_reset_time != self.last_reset_time:
-                # 如果刷新时间点变了，执行每日重置任务
-                logger.info(f"检测到刷新时间点变更（每日{self.daily_reset_hour}点刷新），从 {self.last_reset_time} 到 {current_reset_time}，开始执行稀有鱼配额重置...")
-                self.last_reset_time = current_reset_time
-                
-                # 重置所有受配额限制区域的稀有鱼计数（4星及以上）
-                all_zones = self.inventory_repo.get_all_zones()
-                reset_count = 0
-                for zone in all_zones:
-                    if zone.daily_rare_fish_quota > 0:  # 只重置有配额的区域
-                        zone.rare_fish_caught_today = 0
-                        self.inventory_repo.update_fishing_zone(zone)
-                        reset_count += 1
-                
-                logger.info(f"稀有鱼配额重置完成，共重置 {reset_count} 个区域的计数")
-                return True
-        
-        return False
+
+        with self.daily_reset_lock:
+            if current_reset_time <= self.last_reset_time:
+                return False
+            logger.info(f"到达每日刷新时间（每日{self.daily_reset_hour}点），开始执行每日任务...")
+            self.last_reset_time = current_reset_time
+            self._save_last_reset_time(current_reset_time)
+            self.enforce_zone_pass_requirements_for_all_users()
+            return True
 
     def start_auto_fishing_task(self):
         """启动自动钓鱼的后台线程。"""
@@ -960,29 +967,27 @@ class FishingService:
                 except Exception as e:
                     logger.warning(f"关闭后台线程数据库连接失败: {e}")
 
-    def _process_auto_fishing_user(self, user_id: str, cooldown: float) -> None:
+    def _notify(self, user_id: str, message: str) -> None:
+        if not self._notifier:
+            return
+        try:
+            self._notifier(user_id, message)
+        except Exception:
+            pass
+
+    def _process_auto_fishing_user(self, user_id: str) -> None:
         """处理单个自动钓鱼用户，异常由循环按用户隔离。"""
         user = self.user_repo.get_by_id(user_id)
         if not user:
             return
 
+        # 自动钓鱼按效率放慢出竿间隔，收益低于手动
+        cooldown = self.get_cooldown_seconds(user_id, auto=True)
         now_ts = get_now().timestamp()
         last_ts = 0
         if user.last_fishing_time and user.last_fishing_time.year > 1:
             last_ts = user.last_fishing_time.timestamp()
-        elif user.last_fishing_time and user.last_fishing_time.year <= 1:
-            user.last_fishing_time = get_now() - timedelta(seconds=cooldown)
-            last_ts = user.last_fishing_time.timestamp()
-
-        effective_cooldown = cooldown
-        equipped_accessory = self.inventory_repo.get_user_equipped_accessory(user_id)
-        if equipped_accessory:
-            accessory_template = self.item_template_repo.get_accessory_by_id(
-                equipped_accessory.accessory_id
-            )
-            if accessory_template and accessory_template.name == "海洋之心":
-                effective_cooldown /= 2
-        if now_ts - last_ts < effective_cooldown:
+        if now_ts - last_ts < cooldown:
             return
 
         zone = self.inventory_repo.get_zone_by_id(user.fishing_zone_id)
@@ -997,42 +1002,32 @@ class FishingService:
             return
 
         result = self.go_fish(user_id)
-        if result and not result.get("success") and "已自动传送回" in result.get("message", ""):
-            try:
-                if self._notifier:
-                    self._notifier(user_id, f"🌅 {result['message']}")
-            except Exception:
-                pass
+        if not result:
+            return
+        if not result.get("success") and "已自动传送回" in result.get("message", ""):
+            self._notify(user_id, f"🌅 {result['message']}")
+        if result.get("zone_requirement_failed"):
+            # 鱼竿不满足区域要求（比如鱼竿坏了），继续跑只会一直失败
+            self.user_repo.set_auto_fishing_enabled(user_id, False)
+            self._notify(user_id, f"{result['message']}\n🚫 自动钓鱼已关闭")
+            return
 
-        if result and result.get("equipment_broken_messages"):
-            for msg in result["equipment_broken_messages"]:
-                try:
-                    if self._notifier:
-                        self._notifier(user_id, msg)
-                except Exception:
-                    pass
+        for msg in result.get("equipment_broken_messages") or []:
+            self._notify(user_id, msg)
 
     def _auto_fishing_loop(self):
         """自动钓鱼循环任务，由后台线程执行。"""
-        fishing_config = self.config.get("fishing", {})
-        cooldown = fishing_config.get("cooldown_seconds", 180)
-
         while self.auto_fishing_running:
             try:
-                # 检查并执行每日重置（如果需要）
-                if self._reset_rare_fish_daily_quota():
-                    # 如果执行了重置，说明是新的一天，执行其他每日任务
-                    logger.info("自动钓鱼线程检测到新的一天，开始执行每日任务...")
+                # 到了每日刷新时间就执行每日任务（通行证续期等）
+                self._run_daily_tasks_if_due()
 
-                    # 每日检查：需要通行证的区域玩家是否仍持有通行证
-                    self.enforce_zone_pass_requirements_for_all_users()
-                
                 # 获取所有开启自动钓鱼的用户
                 auto_users_ids = self.user_repo.get_all_user_ids(auto_fishing_only=True)
 
                 for user_id in auto_users_ids:
                     try:
-                        self._process_auto_fishing_user(user_id, cooldown)
+                        self._process_auto_fishing_user(user_id)
                     except Exception as e:
                         logger.error(f"用户 {user_id} 自动钓鱼任务出错: {e}", exc_info=True)
 

@@ -56,9 +56,7 @@ class FishingPlugin(Star):
         super().__init__(context)
 
         # --- 1. 加载配置 ---
-        self.area2num = config.get("area2num", 2000)
-        self.area3num = config.get("area3num", 500)
-        
+
         # 插件数据统一放在 AstrBot 的 data/plugin_data/<插件名> 下
         self.plugin_id = PLUGIN_NAME
         self.data_dir = str(StarTools.get_data_dir(PLUGIN_NAME))
@@ -87,8 +85,8 @@ class FishingPlugin(Star):
         
         self.game_config = {
             "fishing": {
-                "cost": config.get("fish_cost", 10), 
-                "cooldown_seconds": fishing_config.get("cooldown_seconds", 180)
+                "cooldown_seconds": fishing_config.get("cooldown_seconds", 180),
+                "auto_fishing_efficiency": fishing_config.get("auto_fishing_efficiency", 0.5),
             },
             "quality_bonus_max_chance": fishing_config.get("quality_bonus_max_chance", 0.35),
             "steal": {
@@ -98,7 +96,8 @@ class FishingPlugin(Star):
                 "enabled": electric_fish_config.get("enabled", True),
                 "cooldown_seconds": electric_fish_config.get("cooldown_seconds", 7200),
                 "base_success_rate": electric_fish_config.get("base_success_rate", 0.6),
-                "failure_penalty_max_rate": electric_fish_config.get("failure_penalty_max_rate", 0.5)
+                "failure_penalty_max_rate": electric_fish_config.get("failure_penalty_max_rate", 0.5),
+                "failure_penalty_cap": electric_fish_config.get("failure_penalty_cap", 5000),
             },
             "daily_reset_hour": game_global_config.get("daily_reset_hour", 0),
             "user": {
@@ -235,7 +234,8 @@ class FishingPlugin(Star):
 
         # --- 5. 初始化核心游戏数据 ---
         data_setup_service = DataSetupService(
-            self.item_template_repo, self.gacha_repo, self.shop_repo, self.user_repo
+            self.item_template_repo, self.gacha_repo, self.shop_repo, self.user_repo,
+            inventory_repo=self.inventory_repo,
         )
         data_setup_service.setup_initial_data()
         # 确保初始道具存在（在已有数据库上也可幂等执行）
@@ -290,13 +290,13 @@ class FishingPlugin(Star):
 
     @filter.command("签到")
     async def sign_in(self, event: AstrMessageEvent):
-        """每日签到领取奖励，连续签到奖励更丰厚"""
+        """每日签到领取金币和每日补给"""
         async for r in common_handlers.sign_in(self, event):
             yield r
 
     @filter.command("自动钓鱼")
     async def auto_fish(self, event: AstrMessageEvent):
-        """开启或关闭自动钓鱼功能，自动钓鱼会定期帮你钓鱼"""
+        """开启或关闭自动钓鱼，自动钓鱼的出竿频率低于手动"""
         async for r in self.fishing_handlers.auto_fish(event): 
             yield r
 
@@ -306,13 +306,13 @@ class FishingPlugin(Star):
         async for r in common_handlers.fishing_log(self, event):
             yield r
 
-    @filter.command("状态", alias={"我的状态"})
+    @filter.command("钓鱼状态", alias={"我的状态"})
     async def state(self, event: AstrMessageEvent):
         """查看你的游戏状态，包括金币、等级、装备等信息"""
         async for r in common_handlers.state(self, event):
             yield r
 
-    @filter.command("钓鱼帮助", alias={"钓鱼菜单", "菜单"})
+    @filter.command("钓鱼帮助", alias={"钓鱼菜单"})
     async def fishing_help(self, event: AstrMessageEvent):
         """查看钓鱼游戏的帮助信息和所有可用命令"""
         async for r in common_handlers.fishing_help(self, event):
@@ -417,15 +417,15 @@ class FishingPlugin(Star):
         async for r in inventory_handlers.accessories(self, event):
             yield r
 
-    @filter.command("锁定", alias={"上锁"})
+    @filter.command("锁定装备", alias={"上锁"})
     async def lock_equipment(self, event: AstrMessageEvent):
-        """锁定装备防止误操作。用法：锁定 装备编号"""
+        """锁定装备防止误操作。用法：锁定装备 装备编号"""
         async for r in inventory_handlers.lock_equipment(self, event):
             yield r
 
-    @filter.command("解锁", alias={"开锁"})
+    @filter.command("解锁装备", alias={"开锁"})
     async def unlock_equipment(self, event: AstrMessageEvent):
-        """解锁已锁定的装备。用法：解锁 装备编号"""
+        """解锁已锁定的装备。用法：解锁装备 装备编号"""
         async for r in inventory_handlers.unlock_equipment(self, event):
             yield r
 
@@ -455,7 +455,7 @@ class FishingPlugin(Star):
 
     @filter.command("高级货币", alias={"钻石", "星石"})
     async def premium(self, event: AstrMessageEvent):
-        """查看你当前拥有的高级货币（钻石/星石）数量"""
+        """查看你当前拥有的高级货币数量"""
         async for r in inventory_handlers.premium(self, event):
             yield r
 

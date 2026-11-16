@@ -390,16 +390,6 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
                     (user_id, fish_id, quality_level, total_catches),
                 )
 
-                if settlement["is_rare"]:
-                    cursor.execute(
-                        """
-                        UPDATE fishing_zones
-                        SET rare_fish_caught_today = rare_fish_caught_today + 1
-                        WHERE id = ?
-                        """,
-                        (settlement["zone_id"],),
-                    )
-
                 rod_instance_id = settlement.get("rod_instance_id")
                 rod_durability = settlement.get("rod_durability")
                 if rod_instance_id is not None and rod_durability is not None:
@@ -774,15 +764,25 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
                 return zone
             else:
                 raise ValueError(f"钓鱼区域ID {zone_id} 不存在。")
-    def update_fishing_zone(self, zone: FishingZone) -> None:
-        """更新钓鱼区域信息"""
+    def get_meta(self, key: str) -> Optional[str]:
+        """读取 db_meta 里的一项记录。"""
         with self._connection_manager.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE fishing_zones
-                SET name = ?, description = ?, daily_rare_fish_quota = ?, rare_fish_caught_today = ?
-                WHERE id = ?
-            """, (zone.name, zone.description, zone.daily_rare_fish_quota, zone.rare_fish_caught_today, zone.id))
+            row = conn.execute("SELECT value FROM db_meta WHERE key = ?", (key,)).fetchone()
+            return row[0] if row else None
+
+    def set_meta(self, key: str, value: str) -> None:
+        """写入 db_meta 里的一项记录。"""
+        with self._connection_manager.get_connection() as conn:
+            conn.execute("INSERT OR REPLACE INTO db_meta (key, value) VALUES (?, ?)", (key, value))
+            conn.commit()
+
+    def set_zone_pass_requirement(self, zone_id: int, item_id: Optional[int]) -> None:
+        """设置区域需要的通行证，item_id 为 None 表示不需要通行证。"""
+        with self._connection_manager.get_connection() as conn:
+            conn.execute(
+                "UPDATE fishing_zones SET requires_pass = ?, required_item_id = ? WHERE id = ?",
+                (1 if item_id else 0, item_id, zone_id),
+            )
             conn.commit()
 
     def get_all_zones(self) -> List[FishingZone]:
@@ -832,20 +832,20 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
             cursor = conn.cursor()
             try:
                 cursor.execute("""
-                    INSERT INTO fishing_zones (id, name, description, daily_rare_fish_quota, configs, is_active, available_from, available_until, required_item_id, requires_pass, fishing_cost)
+                    INSERT INTO fishing_zones (id, name, description, configs, is_active, available_from, available_until, required_item_id, requires_pass, fishing_cost, required_rod_rarity)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     zone_data['id'],
                     zone_data['name'],
                     zone_data['description'],
-                    zone_data['daily_rare_fish_quota'],
                     json.dumps(zone_data.get('configs', {})),
                     zone_data.get('is_active', True),
                     zone_data.get('available_from'),
                     zone_data.get('available_until'),
                     zone_data.get('required_item_id'),
                     zone_data.get('requires_pass', False),
-                    zone_data.get('fishing_cost', 10)
+                    zone_data.get('fishing_cost', 10),
+                    zone_data.get('required_rod_rarity', 0),
                 ))
                 conn.commit()
             except sqlite3.IntegrityError as e:
@@ -861,12 +861,11 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
             cursor = conn.cursor()
             cursor.execute("""
                 UPDATE fishing_zones
-                SET name = ?, description = ?, daily_rare_fish_quota = ?, configs = ?, is_active = ?, available_from = ?, available_until = ?, required_item_id = ?, requires_pass = ?, fishing_cost = ?
+                SET name = ?, description = ?, configs = ?, is_active = ?, available_from = ?, available_until = ?, required_item_id = ?, requires_pass = ?, fishing_cost = ?, required_rod_rarity = ?
                 WHERE id = ?
             """, (
                 zone_data['name'],
                 zone_data['description'],
-                zone_data['daily_rare_fish_quota'],
                 json.dumps(zone_data.get('configs', {})),
                 zone_data.get('is_active', True),
                 zone_data.get('available_from'),
@@ -874,6 +873,7 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
                 zone_data.get('required_item_id'),
                 zone_data.get('requires_pass', False),
                 zone_data.get('fishing_cost', 10),
+                zone_data.get('required_rod_rarity', 0),
                 zone_id
             ))
             conn.commit()

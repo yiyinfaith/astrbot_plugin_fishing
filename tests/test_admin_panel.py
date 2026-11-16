@@ -25,6 +25,8 @@ REMOVED_COMMANDS = [
     "发红包", "领红包", "红包列表", "撤回红包", "系统借款", "确认借款", "借条", "一键还债", "还系统",
     "钓鱼银行", "钓鱼存款", "钓鱼取款", "钓鱼还税", "还税", "税收记录",
     "交易所", "持仓", "交易所升级", "升级交易所", "交易所扩容", "清仓",
+    # 与其他插件重名，改为「锁定装备」「解锁装备」「钓鱼状态」
+    "锁定", "解锁", "状态", "菜单",
 ]
 
 
@@ -46,7 +48,8 @@ class CommandSurfaceTests(unittest.TestCase):
             self.assertNotIn(command, names | aliases, command)
         self.assertNotIn("filter.regex", MAIN_SOURCE)
         # 保留的核心玩法仍在
-        for command in ("钓鱼", "鱼塘", "商店", "商店购买", "市场", "上架", "购买", "下架", "出售", "抽卡", "偷鱼", "排行榜", "转账"):
+        for command in ("钓鱼", "鱼塘", "商店", "商店购买", "市场", "上架", "购买", "下架", "出售", "抽卡", "偷鱼", "排行榜", "转账",
+                        "锁定装备", "解锁装备", "钓鱼状态"):
             self.assertIn(command, names)
 
     def test_removed_modules_are_gone(self):
@@ -144,11 +147,12 @@ class AdminApiTests(unittest.TestCase):
     def test_zone_create_keeps_specific_fish(self):
         fish = [f["id"] for f in self.call(self.api.catalog)["fish"][:3]]
         self.call(self.api.zone_save, body={
-            "is_new": "1", "id": 42, "name": "测试区", "fishing_cost": 5, "daily_rare_fish_quota": 1,
+            "is_new": "1", "id": 42, "name": "测试区", "fishing_cost": 5, "required_rod_rarity": 2,
             "rarity_distribution": [0.5, 0.3, 0.15, 0.04, 0.01, 0], "specific_fish_ids": fish,
         })
         zone = next(z for z in self.call(self.api.zones_list)["rows"] if z["id"] == 42)
         self.assertEqual(sorted(zone["specific_fish_ids"]), sorted(fish))
+        self.assertEqual(zone["required_rod_rarity"], 2)
         with self.assertRaises(self.ApiError):
             self.call(self.api.zone_save, body={"id": 42, "name": "x", "rarity_distribution": [1, 1, 0, 0, 0, 0]})
         self.call(self.api.zone_delete, body={"id": 42})
@@ -198,7 +202,7 @@ class AdminApiTests(unittest.TestCase):
         self.assertEqual(self.plugin.user_repo.get_by_id("1001").coins, 895)
         self.assertEqual(self.plugin.user_repo.get_by_id("1002").coins, before + 100)
         routes = {r[0] for r in self.api.routes()}
-        self.assertFalse({"bank", "tax", "tax/save", "exchange", "exchange/update"} & routes)
+        self.assertFalse({"bank", "tax", "tax/save", "exchange", "exchange/update", "ops/replenish"} & routes)
 
     def test_market_rejects_commodity_listings(self):
         self.assertFalse(hasattr(self.plugin, "exchange_service"))
@@ -248,9 +252,10 @@ class DatabaseSchemaTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_single_schema_script(self):
+    def test_schema_scripts(self):
+        # 1.0.0 起只有新结构的脚本，没有兼容旧版的迁移
         scripts = sorted(p.name for p in (PLUGIN_DIR / "core" / "database" / "migrations").glob("[0-9][0-9][0-9]_*.py"))
-        self.assertEqual(scripts, ["001_initial_schema.py"])
+        self.assertEqual(scripts, ["001_initial_schema.py", "002_rule_adjustments.py"])
 
     def test_fresh_database_has_no_legacy_tables_or_columns(self):
         self.migration.run_migrations(str(self.db), self.migrations_dir)
@@ -261,7 +266,10 @@ class DatabaseSchemaTests(unittest.TestCase):
         for name in columns:
             self.assertFalse(re.search(r"wipe_bomb|wof_|wheel_of_fate|sicbo|exchange", name), name)
         self.assertEqual(conn.execute("SELECT COUNT(*) FROM fishing_zones").fetchone()[0], 3)
-        self.assertEqual(conn.execute("SELECT version FROM schema_version").fetchone()[0], 1)
+        self.assertEqual(conn.execute("SELECT version FROM schema_version").fetchone()[0], 2)
+        zone_columns = {r[1] for r in conn.execute("PRAGMA table_info(fishing_zones)")}
+        self.assertFalse({"daily_rare_fish_quota", "rare_fish_caught_today"} & zone_columns)
+        self.assertIn("required_rod_rarity", zone_columns)
         conn.close()
         # 再跑一次不会把自己当成旧库
         self.assertIsNone(self.migration.retire_legacy_database(str(self.db)))

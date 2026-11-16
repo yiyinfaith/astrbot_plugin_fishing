@@ -369,9 +369,12 @@ class InventoryService:
             if not rod_instance.is_locked and not rod_instance.is_equipped:
                 rod_template = self.item_template_repo.get_rod_by_id(rod_instance.rod_id)
                 if rod_template:
-                    base_price = self.config["sell_prices"]["rod"].get(str(rod_template.rarity), 100)
-                    refine_multiplier = self.config["sell_prices"]["refine_multiplier"].get(str(rod_instance.refine_level), 1.0)
-                    rod_prices[rod_instance.rod_instance_id] = int(base_price * refine_multiplier)
+                    rod_prices[rod_instance.rod_instance_id] = self.game_mechanics_service.calculate_sell_price(
+                        item_type="rod",
+                        rarity=rod_template.rarity,
+                        refine_level=rod_instance.refine_level,
+                        purchase_cost=rod_template.purchase_cost,
+                    )
 
         accessory_prices = {}
         accessory_instances = self.inventory_repo.get_user_accessory_instances(user_id)
@@ -379,9 +382,11 @@ class InventoryService:
             if not accessory_instance.is_locked and not accessory_instance.is_equipped:
                 accessory_template = self.item_template_repo.get_accessory_by_id(accessory_instance.accessory_id)
                 if accessory_template:
-                    base_price = self.config["sell_prices"]["accessory"].get(str(accessory_template.rarity), 100)
-                    refine_multiplier = self.config["sell_prices"]["refine_multiplier"].get(str(accessory_instance.refine_level), 1.0)
-                    accessory_prices[accessory_instance.accessory_instance_id] = int(base_price * refine_multiplier)
+                    accessory_prices[accessory_instance.accessory_instance_id] = self.game_mechanics_service.calculate_sell_price(
+                        item_type="accessory",
+                        rarity=accessory_template.rarity,
+                        refine_level=accessory_instance.refine_level,
+                    )
 
         sold_items = self.inventory_repo.sell_everything_atomic(
             user_id, rod_prices, accessory_prices
@@ -506,6 +511,7 @@ class InventoryService:
             item_type="rod",
             rarity=rod_template.rarity,
             refine_level=rod_to_sell.refine_level,
+            purchase_cost=rod_template.purchase_cost,
         )
 
         # 4. 执行操作
@@ -545,6 +551,7 @@ class InventoryService:
                     item_type="rod",
                     rarity=rod_template.rarity,
                     refine_level=rod_instance.refine_level,
+                    purchase_cost=rod_template.purchase_cost,
                 )
                 total_value += sell_price
                 rods_to_sell.append(rod_instance)

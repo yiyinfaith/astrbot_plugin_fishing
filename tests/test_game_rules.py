@@ -1,0 +1,259 @@
+"""1.0.0 规则调整的回归测试：刷钱漏洞、区域门槛、通行证续期、自动钓鱼效率等。"""
+
+import asyncio
+import shutil
+import sqlite3
+import tempfile
+import unittest
+from datetime import timedelta
+from pathlib import Path
+
+import astrbot_stub
+
+PLUGIN_DIR = Path(__file__).resolve().parents[1]
+PASS_NAME = "前往神秘海域的通行证"
+
+
+def run(coro):
+    return asyncio.run(coro)
+
+
+class GameRuleTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        cls.plugin, _ = astrbot_stub.load_plugin(Path(cls.tmp.name), {})
+        cls.plugin.fishing_service.stop_auto_fishing_task()
+        cls.templates = cls.plugin.item_template_repo
+        cls.inventory = cls.plugin.inventory_repo
+
+    @classmethod
+    def tearDownClass(cls):
+        run(cls.plugin.terminate())
+        cls.tmp.cleanup()
+
+    _next_uid = 2000
+
+    def new_user(self, coins=0):
+        GameRuleTests._next_uid += 1
+        uid = str(GameRuleTests._next_uid)
+        self.plugin.user_service.register(uid, f"玩家{uid}")
+        user = self.plugin.user_repo.get_by_id(uid)
+        user.coins = coins
+        self.plugin.user_repo.update(user)
+        return uid
+
+    def coins(self, uid):
+        return self.plugin.user_repo.get_by_id(uid).coins
+
+    def shop_item(self, name):
+        for item in self.plugin.shop_repo.get_shop_items(1):
+            if item["name"] == name:
+                return item["item_id"]
+        raise AssertionError(name)
+
+    def template_id(self, getter, name, field):
+        return next(getattr(t, field) for t in getter() if t.name == name)
+
+    def give_and_equip_rod(self, uid, name):
+        rod_id = self.template_id(self.templates.get_all_rods, name, "rod_id")
+        self.plugin.user_service.add_item_to_user_inventory(uid, "rod", rod_id, 1)
+        instance = max(self.inventory.get_user_rod_instances(uid), key=lambda r: r.rod_instance_id)
+        result = self.plugin.inventory_service.equip_item(uid, instance.rod_instance_id, "rod")
+        self.assertTrue(result["success"], result)
+
+    def pass_count(self, uid):
+        pass_id = self.template_id(self.templates.get_all_items, PASS_NAME, "item_id")
+        return self.inventory.get_user_item_inventory(uid).get(pass_id, 0)
+
+    # 1. 买鱼竿再卖给系统不能赚钱
+    def test_shop_rod_resale_is_not_profitable(self):
+        uid = self.new_user(coins=5000)
+        result = self.plugin.shop_service.purchase_item(uid, self.shop_item("新手木竿"), 10)
+        self.assertTrue(result["success"], result)
+        self.assertEqual(self.coins(uid), 4500)
+        self.plugin.inventory_service.sell_all_rods(uid)
+        self.assertEqual(self.coins(uid), 4750)
+
+    # 2. 卡池的金币奖励低于单抽价格，每日补给池有内容
+    def test_gacha_coin_rewards_are_below_cost(self):
+        for pool in self.plugin.gacha_repo.get_all_pools():
+            items = self.plugin.gacha_repo.get_pool_items(pool.gacha_pool_id)
+            self.assertTrue(items, pool.name)
+            for item in items:
+                if item.item_type == "coins" and pool.cost_coins:
+                    self.assertLess(item.quantity, pool.cost_coins, pool.name)
+
+    # 3. 区域二要 2 星鱼竿，区域三要通行证（商店有售，进入时消耗）
+    def test_zone_gates(self):
+        uid = self.new_user(coins=100000)
+        result = self.plugin.fishing_service.set_user_fishing_zone(uid, 2)
+        self.assertFalse(result["success"])
+        self.assertIn("2 星", result["message"])
+        self.give_and_equip_rod(uid, "竹制鱼竿")
+        self.assertTrue(self.plugin.fishing_service.set_user_fishing_zone(uid, 2)["success"])
+
+        self.assertFalse(self.plugin.fishing_service.set_user_fishing_zone(uid, 3)["success"])
+        pass_offer = self.shop_item(PASS_NAME)
+        self.assertTrue(self.plugin.shop_service.purchase_item(uid, pass_offer, 2)["success"])
+        self.assertEqual(self.coins(uid), 60000)
+        self.assertEqual(self.pass_count(uid), 2)
+        self.assertTrue(self.plugin.fishing_service.set_user_fishing_zone(uid, 3)["success"])
+        self.assertEqual(self.pass_count(uid), 1)
+        # 已经在这里，再切换一次不会多扣通行证
+        self.assertFalse(self.plugin.fishing_service.set_user_fishing_zone(uid, 3)["success"])
+        self.assertEqual(self.pass_count(uid), 1)
+
+    # 3. 每日刷新：有通行证就续期，没有就回到 1 号区域
+    def test_daily_pass_renewal(self):
+        service = self.plugin.fishing_service
+        keep, leave = self.new_user(coins=100000), self.new_user(coins=100000)
+        offer = self.shop_item(PASS_NAME)
+        self.plugin.shop_service.purchase_item(keep, offer, 2)
+        self.plugin.shop_service.purchase_item(leave, offer, 1)
+        for uid in (keep, leave):
+            self.assertTrue(service.set_user_fishing_zone(uid, 3)["success"])
+
+        service.last_reset_time -= timedelta(days=1)
+        self.assertTrue(service._run_daily_tasks_if_due())
+        self.assertFalse(service._run_daily_tasks_if_due())
+        self.assertEqual(self.plugin.user_repo.get_by_id(keep).fishing_zone_id, 3)
+        self.assertEqual(self.pass_count(keep), 0)
+        self.assertEqual(self.plugin.user_repo.get_by_id(leave).fishing_zone_id, 1)
+        # 刷新时间点记在数据库里，重载后不会重复执行
+        self.assertEqual(service._load_last_reset_time(), service.last_reset_time)
+
+    # 4. 区域三有 6 星以上的概率，星级越高越难出
+    def test_zone_three_can_yield_mythic_fish(self):
+        zone = self.inventory.get_zone_by_id(3)
+        dist = zone.configs["rarity_distribution"]
+        self.assertEqual(len(dist), 6)
+        self.assertGreater(dist[5], 0)
+        self.assertAlmostEqual(sum(dist), 1.0)
+        picks = [self.plugin.fishing_service._get_random_high_rarity(zone) for _ in range(4000)]
+        self.assertGreater(picks.count(6), picks.count(7))
+        self.assertGreater(picks.count(7), picks.count(8))
+        self.assertGreater(picks.count(8), 0)
+
+    # 5. 没有稀有鱼配额
+    def test_no_rare_fish_quota(self):
+        with self.inventory._connection_manager.get_connection() as conn:
+            columns = {r[1] for r in conn.execute("PRAGMA table_info(fishing_zones)")}
+        self.assertNotIn("daily_rare_fish_quota", columns)
+        self.assertNotIn("rare_fish_caught_today", columns)
+        uid = self.new_user(coins=1000)
+        result = self.plugin.fishing_service.go_fish(uid)
+        self.assertIn("message" if not result["success"] else "fish", result)
+
+    # 6 与 12. 自动钓鱼按效率放慢；冷却倍率来自饰品属性而不是名字
+    def test_cooldowns(self):
+        service = self.plugin.fishing_service
+        uid = self.new_user()
+        self.assertEqual(service.get_cooldown_seconds(uid), 180)
+        self.assertEqual(service.get_cooldown_seconds(uid, auto=True), 360)
+        heart = self.template_id(self.templates.get_all_accessories, "海洋之心", "accessory_id")
+        self.plugin.user_service.add_item_to_user_inventory(uid, "accessory", heart, 1)
+        instance = self.inventory.get_user_accessory_instances(uid)[0]
+        self.plugin.inventory_service.equip_item(uid, instance.accessory_instance_id, "accessory")
+        self.assertEqual(service.get_cooldown_seconds(uid), 90)
+        self.assertEqual(service.get_cooldown_seconds(uid, auto=True), 180)
+
+    # 7 与 8. 签到不再给高级货币，会领每日补给
+    def test_sign_in(self):
+        uid = self.new_user()
+        result = self.plugin.user_service.daily_sign_in(uid)
+        self.assertTrue(result["success"], result)
+        self.assertNotIn("高级货币", result["message"])
+        self.assertIn("每日补给", result["message"])
+        self.assertEqual(self.plugin.user_repo.get_by_id(uid).premium_currency, 0)
+
+    # 8. 没有商品的商店默认关闭
+    def test_empty_shops_are_closed(self):
+        for shop in self.plugin.shop_repo.get_all_shops():
+            has_items = bool(self.plugin.shop_repo.get_shop_items(shop["shop_id"]))
+            self.assertEqual(bool(shop["is_active"]), has_items, shop["name"])
+
+    # 9. 电鱼失败的罚款有上限
+    def test_electric_fish_penalty_is_capped(self):
+        mechanics = self.plugin.game_mechanics_service
+        thief, victim = self.new_user(coins=1_000_000), self.new_user()
+        self.inventory.add_fish_to_inventory(victim, 1, 150)
+        mechanics.config["electric_fish"]["base_success_rate"] = 0.0
+        try:
+            result = mechanics.electric_fish(thief, victim)
+        finally:
+            mechanics.config["electric_fish"]["base_success_rate"] = 0.6
+        self.assertFalse(result["success"])
+        self.assertGreaterEqual(self.coins(thief), 1_000_000 - 5000)
+
+    # 10. 所有内置鱼竿都有耐久
+    def test_all_rods_have_durability(self):
+        for rod in self.templates.get_all_rods():
+            self.assertIsNotNone(rod.durability, rod.name)
+            self.assertGreater(rod.durability, 0, rod.name)
+
+
+class UpgradeMigrationTests(unittest.TestCase):
+    """已有的 1.0.0 库升级后内置内容换成新数值，管理员改过的不动。"""
+
+    def setUp(self):
+        astrbot_stub.install(Path(tempfile.mkdtemp()))
+        import importlib
+        import sys
+        sys.path.insert(0, str(PLUGIN_DIR.parent))
+        self.migration = importlib.import_module(f"{PLUGIN_DIR.name}.core.database.migration")
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.db = Path(self.tmp.name) / "fish.db"
+        self.migrations_dir = PLUGIN_DIR / "core" / "database" / "migrations"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_upgrade_from_first_schema(self):
+        only_first = Path(self.tmp.name) / "m1"
+        only_first.mkdir()
+        shutil.copy(self.migrations_dir / "001_initial_schema.py", only_first)
+        self.migration.run_migrations(str(self.db), str(only_first))
+
+        conn = sqlite3.connect(self.db)
+        conn.executescript(f"""
+            INSERT INTO rods (rod_id, name, rarity, source, durability) VALUES (1, '新手木竿', 1, 'shop', NULL),
+                (5, '海神之赐', 5, 'gacha', NULL), (6, '自定义竿', 2, 'shop', NULL);
+            INSERT INTO users (user_id, nickname) VALUES ('u', 'u');
+            INSERT INTO user_rods (user_id, rod_id, refine_level) VALUES ('u', 1, 2), ('u', 5, 10);
+            INSERT INTO items (item_id, name, rarity, effect_description) VALUES (5, '{PASS_NAME}', 5, '进入特定钓鱼区域时自动消耗。');
+            INSERT INTO items (item_id, name, rarity) VALUES (2, '幸运药水', 3);
+            INSERT INTO baits (bait_id, name, rarity) VALUES (1, '普通蚯蚓', 1);
+            INSERT INTO accessories (accessory_id, name, rarity) VALUES (4, '海洋之心', 5);
+            INSERT INTO gacha_pools (gacha_pool_id, name, cost_coins) VALUES (1, '稀有鱼竿池', 5000), (2, '珍贵饰品池', 10000), (3, '每日补给池', 0);
+            INSERT INTO gacha_pool_items (gacha_pool_id, item_type, item_id, quantity, weight) VALUES
+                (1, 'coins', 0, 10000, 57), (2, 'coins', 0, 15000, 80);
+            INSERT INTO shops (shop_id, name) VALUES (1, '海鸥港杂货铺'), (2, '七海珍宝阁');
+        """)
+        conn.commit()
+        conn.close()
+
+        self.migration.run_migrations(str(self.db), str(self.migrations_dir))
+        conn = sqlite3.connect(self.db)
+        q = lambda sql, *a: conn.execute(sql, a).fetchall()
+        self.assertEqual(q("SELECT version FROM schema_version")[0][0], 2)
+        self.assertEqual(dict(q("SELECT name, durability FROM rods")), {"新手木竿": 200, "海神之赐": 3000, "自定义竿": None})
+        self.assertEqual(sorted(q("SELECT rod_id, current_durability FROM user_rods")), [(1, 300), (5, None)])
+        self.assertEqual(q("SELECT quantity FROM gacha_pool_items WHERE gacha_pool_id = 1")[0][0], 2000)
+        # 管理员改过的数量不动
+        self.assertEqual(q("SELECT quantity FROM gacha_pool_items WHERE gacha_pool_id = 2")[0][0], 15000)
+        self.assertEqual(len(q("SELECT 1 FROM gacha_pool_items WHERE gacha_pool_id = 3")), 2)
+        self.assertEqual(q("SELECT cooldown_modifier FROM accessories WHERE name = '海洋之心'")[0][0], 0.5)
+        self.assertEqual(q("SELECT is_active FROM shops WHERE shop_id = 2")[0][0], 0)
+        offer = q("SELECT item_id FROM shop_items WHERE shop_id = 1 AND name = ?", PASS_NAME)
+        self.assertEqual(len(offer), 1)
+        self.assertEqual(q("SELECT cost_amount FROM shop_item_costs WHERE item_id = ?", offer[0][0])[0][0], 20000)
+        zones = {r[0]: r[1:] for r in q("SELECT id, required_rod_rarity, requires_pass, required_item_id, configs FROM fishing_zones")}
+        self.assertEqual(zones[2][0], 2)
+        self.assertEqual(zones[3][1:3], (1, 5))
+        self.assertIn("0.005", zones[3][3])
+        conn.close()
+
+
+if __name__ == "__main__":
+    unittest.main()

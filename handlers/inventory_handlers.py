@@ -828,7 +828,7 @@ async def lock_equipment(plugin: "FishingPlugin", event: AstrMessageEvent, equip
     args = event.message_str.split(" ")
     if len(args) < 2:
         yield event.plain_result(
-            "❌ 请指定要锁定的装备ID，例如：/锁定 R1A2B 或 /锁定 A3C4D"
+            "❌ 请指定要锁定的装备ID，例如：/锁定装备 R1A2B 或 /锁定装备 A3C4D"
         )
         return
 
@@ -887,7 +887,7 @@ async def unlock_equipment(plugin: "FishingPlugin", event: AstrMessageEvent, equ
     args = event.message_str.split(" ")
     if len(args) < 2:
         yield event.plain_result(
-            "❌ 请指定要解锁的装备ID，例如：/解锁 R1A2B 或 /解锁 A3C4D"
+            "❌ 请指定要解锁的装备ID，例如：/解锁装备 R1A2B 或 /解锁装备 A3C4D"
         )
         return
 

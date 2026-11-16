@@ -139,7 +139,6 @@ class FishingZoneService:
                 "id": zone.id,
                 "name": zone.name,
                 "description": zone.description,
-                "daily_rare_fish_quota": zone.daily_rare_fish_quota,
                 "configs": zone.configs,
                 "is_active": zone.is_active,
                 "available_from": zone.available_from.isoformat() if zone.available_from else None,
@@ -147,7 +146,8 @@ class FishingZoneService:
                 "specific_fish_ids": specific_fish_ids,
                 "required_item_id": zone.required_item_id,
                 "requires_pass": zone.requires_pass,
-                "fishing_cost": zone.fishing_cost
+                "fishing_cost": zone.fishing_cost,
+                "required_rod_rarity": zone.required_rod_rarity or 0,
             })
         return zones_data
 

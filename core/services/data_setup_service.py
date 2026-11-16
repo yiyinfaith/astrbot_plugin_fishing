@@ -10,8 +10,11 @@ from ..initial_data import (
     ACCESSORY_DATA,
     TITLE_DATA,
     GACHA_POOL,
+    GACHA_POOL_ITEMS,
     ITEM_DATA,
     SHOP_DATA,
+    ZONE_PASS_NAME,
+    ZONE_PASS_PRICE,
 )
 from ..domain.models import Item
 from astrbot.api import logger
@@ -26,6 +29,7 @@ class DataSetupService:
         gacha_repo: AbstractGachaRepository,
         shop_repo: AbstractShopRepository,
         user_repo=None,
+        inventory_repo=None,
     ):
         """
         初始化数据设置服务。
@@ -35,11 +39,13 @@ class DataSetupService:
             gacha_repo: 抽卡仓储的实例。
             shop_repo: 商店仓储的实例。
             user_repo: 用户仓储实例。
+            inventory_repo: 库存仓储实例，用于把通行证关联到钓鱼区域。
         """
         self.gacha_repo = gacha_repo
         self.item_template_repo = item_template_repo
         self.shop_repo = shop_repo
         self.user_repo = user_repo
+        self.inventory_repo = inventory_repo
 
     def setup_initial_data(self):
         """
@@ -115,7 +121,8 @@ class DataSetupService:
                 "bonus_rare_fish_chance": acc[6],
                 "bonus_coin_modifier": acc[7],
                 "other_bonus_description": acc[8],
-                "icon_url": acc[9]
+                "icon_url": acc[9],
+                "cooldown_modifier": acc[10],
             })
 
 
@@ -143,17 +150,10 @@ class DataSetupService:
         self.create_initial_items()
 
         # --- 填充抽卡池具体物品 ---
-        # 检查是否已填充，避免重复
-        if not self.gacha_repo.get_pool_items(1):
-            self.gacha_repo.add_item_to_pool(1, {"item_full_id": "rod-4", "quantity": 1, "weight": 10}) # 星辰钓者
-            self.gacha_repo.add_item_to_pool(1, {"item_full_id": "rod-5", "quantity": 1, "weight": 3}) # 海神之赐
-            self.gacha_repo.add_item_to_pool(1, {"item_full_id": "rod-3", "quantity": 1, "weight": 30}) # 碳素纤维竿
-            self.gacha_repo.add_item_to_pool(1, {"item_full_id": "coins-0", "quantity": 10000, "weight": 57})
+        self._fill_gacha_pools()
 
-        if not self.gacha_repo.get_pool_items(2):
-            self.gacha_repo.add_item_to_pool(2, {"item_full_id": "accessory-4", "quantity": 1, "weight": 5}) # 海洋之心
-            self.gacha_repo.add_item_to_pool(2, {"item_full_id": "accessory-3", "quantity": 1, "weight": 15}) # 丰收号角
-            self.gacha_repo.add_item_to_pool(2, {"item_full_id": "coins-0", "quantity": 20000, "weight": 80})
+        # 区域三需要通行证才能进入
+        self._link_zone_pass()
 
         # --- 填充初始商店 ---
         if not self.shop_repo.get_all_shops():
@@ -174,6 +174,44 @@ class DataSetupService:
             logger.info("初始商店与商品填充完成。")
 
         logger.info("核心游戏数据初始化完成。")
+
+    def _template_id(self, kind: str, name: str):
+        """按名称查找模板 ID，找不到时返回 None。"""
+        getters = {
+            "rod": (self.item_template_repo.get_all_rods, "rod_id"),
+            "accessory": (self.item_template_repo.get_all_accessories, "accessory_id"),
+            "bait": (self.item_template_repo.get_all_baits, "bait_id"),
+            "item": (self.item_template_repo.get_all_items, "item_id"),
+        }
+        getter, id_field = getters[kind]
+        for template in getter():
+            if template.name == name:
+                return getattr(template, id_field)
+        return None
+
+    def _fill_gacha_pools(self):
+        """给还没有内容的内置卡池放入默认物品，已有内容的卡池不动。"""
+        filled = {}
+        for pool_id, kind, name, quantity, weight in GACHA_POOL_ITEMS:
+            if pool_id not in filled:
+                filled[pool_id] = bool(self.gacha_repo.get_pool_items(pool_id))
+            if filled[pool_id]:
+                continue
+            item_id = 0 if kind == "coins" else self._template_id(kind, name)
+            if item_id is None:
+                logger.warning(f"卡池 {pool_id} 的默认物品 {name} 不存在，已跳过")
+                continue
+            self.gacha_repo.add_item_to_pool(
+                pool_id, {"item_full_id": f"{kind}-{item_id}", "quantity": quantity, "weight": weight}
+            )
+
+    def _link_zone_pass(self):
+        """新库里给区域三设置通行证要求。"""
+        if not self.inventory_repo:
+            return
+        pass_id = self._template_id("item", ZONE_PASS_NAME)
+        if pass_id is not None:
+            self.inventory_repo.set_zone_pass_requirement(3, pass_id)
 
     def sync_shops_from_initial_data(self):
         """
@@ -308,6 +346,30 @@ class DataSetupService:
             })
             
             logger.info(f"已上架鱼饵: {bait_name}")
+
+        # 区域三的通行证
+        pass_id = self._template_id("item", ZONE_PASS_NAME)
+        if pass_id is not None and ZONE_PASS_NAME not in existing_item_names:
+            created_item = self.shop_repo.create_shop_item(1, {
+                "name": ZONE_PASS_NAME,
+                "description": "进入区域三「传说之海」需要的通行证，有效到下次每日刷新。",
+                "category": "basic",
+                "is_active": True,
+                "sort_order": 200,
+            })
+            item_id = created_item["item_id"]
+            self.shop_repo.add_item_cost(item_id, {
+                "cost_type": "coins",
+                "cost_amount": ZONE_PASS_PRICE,
+                "cost_relation": "and",
+            })
+            self.shop_repo.add_item_reward(item_id, {
+                "reward_type": "item",
+                "reward_item_id": pass_id,
+                "reward_quantity": 1,
+                "reward_refine_level": 1,
+            })
+            logger.info(f"已上架通行证: {ZONE_PASS_NAME}")
 
     def sync_all_initial_data(self):
         """

@@ -146,11 +146,11 @@ class AquariumService:
                 "message": f"金币不足！需要 {upgrade_config.cost_coins} 金币，当前只有 {user.coins} 金币"
             }
 
-        # 检查用户是否有足够的钻石
+        # 检查用户是否有足够的高级货币
         if user.premium_currency < upgrade_config.cost_premium:
             return {
                 "success": False, 
-                "message": f"钻石不足！需要 {upgrade_config.cost_premium} 钻石，当前只有 {user.premium_currency} 钻石"
+                "message": f"高级货币不足！需要 {upgrade_config.cost_premium}，当前只有 {user.premium_currency}"
             }
 
         # 扣除费用并升级

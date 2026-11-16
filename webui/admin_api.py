@@ -112,7 +112,7 @@ TEMPLATE_KINDS: Dict[str, Dict[str, Any]] = {
         ],
         "columns": [
             "name", "rarity", "slot_type", "bonus_fish_quality_modifier", "bonus_fish_quantity_modifier",
-            "bonus_rare_fish_chance", "bonus_coin_modifier",
+            "bonus_rare_fish_chance", "bonus_coin_modifier", "cooldown_modifier",
         ],
         "fields": [
             {"key": "name", "label": "名称", "type": "text", "required": True},
@@ -122,6 +122,7 @@ TEMPLATE_KINDS: Dict[str, Dict[str, Any]] = {
             {"key": "bonus_fish_quantity_modifier", "label": "数量加成", "type": "float", "default": 1.0},
             {"key": "bonus_rare_fish_chance", "label": "稀有加成", "type": "float", "default": 0.0},
             {"key": "bonus_coin_modifier", "label": "金币加成", "type": "float", "default": 1.0},
+            {"key": "cooldown_modifier", "label": "钓鱼冷却倍率", "type": "float", "default": 1.0, "min": 0.05, "max": 10, "hint": "0.5 表示冷却时间减半，1 表示不影响"},
             {"key": "other_bonus_description", "label": "其他效果描述", "type": "text", "optional": True},
             {"key": "icon_url", "label": "图标 URL", "type": "text", "optional": True},
             {"key": "description", "label": "描述", "type": "textarea", "optional": True},
@@ -361,7 +362,6 @@ class FishingAdminAPI:
             ("broadcast/currency", "POST", self.broadcast_currency, "全体发放或扣除货币"),
             ("broadcast/item", "POST", self.broadcast_item, "全体发放物品"),
             ("ops/sync", "POST", self.ops_sync, "同步初始设定"),
-            ("ops/replenish", "POST", self.ops_replenish, "补充鱼池"),
             ("ops/impersonation", "GET", self.impersonation_list, "代理列表"),
             ("ops/impersonation/start", "POST", self.impersonation_start, "开始代理"),
             ("ops/impersonation/stop", "POST", self.impersonation_stop, "结束代理"),
@@ -754,19 +754,6 @@ class FishingAdminAPI:
         self.p.data_setup_service.sync_all_initial_data()
         return {"message": "初始设定已同步"}
 
-    def ops_replenish(self, query, body):
-        zones = self.p.inventory_repo.get_all_zones()
-        reset = []
-        for zone in zones:
-            if zone.daily_rare_fish_quota > 0:
-                zone.rare_fish_caught_today = 0
-                self.p.inventory_repo.update_fishing_zone(zone)
-                reset.append(zone.name)
-        if not reset:
-            raise ApiError("没有设置了稀有鱼配额的钓鱼区域")
-        logger.info(f"[钓鱼管理] 补充鱼池：{', '.join(reset)}")
-        return {"message": f"已重置 {len(reset)} 个区域的稀有鱼配额", "zones": reset}
-
     def impersonation_list(self, query, body):
         rows = []
         for admin_id, target_id in self.p.impersonation_map.items():
@@ -832,7 +819,10 @@ class FishingAdminAPI:
                     maximum=field.get("max"), optional=field.get("optional", False),
                 )
             elif kind == "float":
-                clean[key] = _float(value, label, default=field.get("default", ...))
+                clean[key] = _float(
+                    value, label, default=field.get("default", ...),
+                    minimum=field.get("min"), maximum=field.get("max"),
+                )
             elif kind == "bool":
                 clean[key] = _bool(value) if value is not None else bool(field.get("default", False))
             elif kind == "select":
@@ -1037,12 +1027,7 @@ class FishingAdminAPI:
     # ------------------------------------------------------------------
 
     def zones_list(self, query, body):
-        zones = self.p.fishing_zone_service.get_all_zones()
-        raw = {zone.id: zone for zone in self.p.inventory_repo.get_all_zones()}
-        for zone in zones:
-            source = raw.get(zone["id"])
-            zone["rare_fish_caught_today"] = getattr(source, "rare_fish_caught_today", 0) if source else 0
-        return {"rows": zones}
+        return {"rows": self.p.fishing_zone_service.get_all_zones()}
 
     def zone_save(self, query, body):
         is_new = _bool(body.get("is_new"))
@@ -1071,7 +1056,7 @@ class FishingAdminAPI:
             "id": zone_id,
             "name": _text(body.get("name"), "区域名称", required=True, max_len=64),
             "description": _text(body.get("description"), "描述", max_len=500) or "",
-            "daily_rare_fish_quota": _int(body.get("daily_rare_fish_quota"), "稀有鱼每日配额", default=0, minimum=0),
+            "required_rod_rarity": _int(body.get("required_rod_rarity"), "鱼竿星级要求", default=0, minimum=0, maximum=10),
             "fishing_cost": _int(body.get("fishing_cost"), "钓鱼消耗", default=10, minimum=1),
             "is_active": _bool(body.get("is_active", True)),
             "available_from": available_from,

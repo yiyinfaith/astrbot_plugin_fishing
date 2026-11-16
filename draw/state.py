@@ -354,15 +354,8 @@ async def draw_state_image(user_data: Dict[str, Any], data_dir: str) -> Image.Im
     zone_name = fishing_zone.get('name', '未知区域')
     zone_display = zone_name[:12] + "..." if len(zone_name) > 12 else zone_name
     draw.text((right_col_x, equipment_row5_y), zone_display, font=content_font, fill=text_primary)
-    if fishing_zone.get('rare_fish_quota', 0) == 0:
-        zone_detail = "此区域无稀有鱼"
-        detail_color = text_muted
-    elif fishing_zone.get('rare_fish_quota', 0) - fishing_zone.get('rare_fish_caught', 0) > 0:
-        zone_detail = f"剩余稀有鱼：{fishing_zone.get('rare_fish_quota', 0) - fishing_zone.get('rare_fish_caught', 0)}条"
-        detail_color = success_color
-    else:
-        zone_detail = "今日稀有鱼已捕完"
-        detail_color = text_muted
+    zone_detail = f"每次钓鱼 {fishing_zone.get('fishing_cost', 0)} 金币" if fishing_zone else ""
+    detail_color = text_muted
     draw.text((right_col_x, equipment_row6_y), zone_detail, font=tiny_font, fill=detail_color)
 
     # 状态信息区域 - 合并今日状态和钓鱼状态
@@ -543,8 +536,7 @@ def get_user_state_data(user_repo, inventory_repo, item_template_repo, log_repo,
             fishing_zone = {
                 'name': zone.name,
                 'description': zone.description,
-                'rare_fish_quota': zone.daily_rare_fish_quota if hasattr(zone, 'daily_rare_fish_quota') else 0,
-                'rare_fish_caught': zone.rare_fish_caught_today if hasattr(zone, 'rare_fish_caught_today') else 0
+                'fishing_cost': zone.fishing_cost,
             }
     
     # 计算偷鱼剩余CD时间

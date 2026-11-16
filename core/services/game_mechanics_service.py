@@ -17,6 +17,9 @@ from ...core.utils import get_now, get_today
 if TYPE_CHECKING:
     from ..repositories.sqlite_user_repo import SqliteUserRepository
 
+# 一次电鱼最多电走的鱼数
+ELECTRIC_FISH_MAX_CATCH = 50
+
 
 class GameMechanicsService:
     """封装偷鱼、电鱼、驱灵与装备售价等独立的游戏机制"""
@@ -212,9 +215,12 @@ class GameMechanicsService:
             penalty_rate = random.gauss(mean, std_dev)
             penalty_rate = max(0.0, min(max_penalty_rate, penalty_rate))
             
-            # 计算实际扣除的金币
+            # 计算实际扣除的金币，并按配置封顶
             penalty_coins = int(thief.coins * penalty_rate)
-            
+            penalty_cap = self.config.get("electric_fish", {}).get("failure_penalty_cap", 5000)
+            if penalty_cap and penalty_cap > 0:
+                penalty_coins = min(penalty_coins, int(penalty_cap))
+
             thief.coins -= penalty_coins
             thief.last_electric_fish_time = now  # 失败也要更新CD
             self.user_repo.update(thief)
@@ -233,29 +239,30 @@ class GameMechanicsService:
             
             return {
                 "success": False,
-                "message": f"❌ 电鱼失败！{severity}降临，雷电击中了你，损失了 {penalty_coins} 金币（{penalty_rate*100:.1f}%）！\n💡 本次成功率为 {final_success_rate*100:.1f}%"
+                "message": f"❌ 电鱼失败！{severity}降临，雷电击中了你，损失了 {penalty_coins} 金币！\n💡 本次成功率为 {final_success_rate*100:.1f}%"
             }
 
         # 4. 成功了！根据成功度（roll值）决定收益档次
         # roll越接近0表示越幸运，获得的收益越高
         success_quality = roll / final_success_rate  # 归一化到0-1之间
         
-        # 分段式收益：
-        # - 大成功（0-0.3）：15%-20%的鱼
-        # - 普通成功（0.3-0.7）：10%-15%的鱼
-        # - 小成功（0.7-1.0）：5%-10%的鱼
+        # 分段式收益（鱼塘超过 400 条时按比例，否则按固定条数）：
+        # - 大成功（0-0.3）：8%-10% 的鱼 / 10-15 条
+        # - 普通成功（0.3-0.7）：5%-8% 的鱼 / 5-10 条
+        # - 小成功（0.7-1.0）：2%-5% 的鱼 / 3-5 条
+        # 单次最多电走 ELECTRIC_FISH_MAX_CATCH 条
         success_type = ""
         multiplier_range = (0, 0)
-        
+
         if success_quality <= 0.3:
             success_type = "⭐大成功"
-            multiplier_range = (0.15, 0.20)
+            multiplier_range = (0.08, 0.10)
         elif success_quality <= 0.7:
             success_type = "✅普通成功"
-            multiplier_range = (0.10, 0.15)
+            multiplier_range = (0.05, 0.08)
         else:
             success_type = "🔹小成功"
-            multiplier_range = (0.05, 0.10)
+            multiplier_range = (0.02, 0.05)
         
         # 5. 准备数据：获取鱼模板并将鱼塘扁平化
         fish_templates = {
@@ -276,12 +283,13 @@ class GameMechanicsService:
         else:
             # 鱼数较少时，使用固定数量区间
             if success_quality <= 0.3:
-                num_to_steal = random.randint(20, 30)  # 大成功
+                num_to_steal = random.randint(10, 15)  # 大成功
             elif success_quality <= 0.7:
-                num_to_steal = random.randint(10, 20)  # 普通成功
+                num_to_steal = random.randint(5, 10)   # 普通成功
             else:
-                num_to_steal = random.randint(5, 10)   # 小成功
+                num_to_steal = random.randint(3, 5)    # 小成功
 
+        num_to_steal = min(num_to_steal, ELECTRIC_FISH_MAX_CATCH)
         actual_num_to_steal = min(num_to_steal, len(all_fish_in_pond))
         initial_catch = random.sample(all_fish_in_pond, actual_num_to_steal)
 
@@ -406,7 +414,7 @@ class GameMechanicsService:
             "message": f"【{target.nickname}】{'有' if protection_buff else '没有'}海灵守护效果"
         }
 
-    def calculate_sell_price(self, item_type: str, rarity: int, refine_level: int) -> int:
+    def calculate_sell_price(self, item_type: str, rarity: int, refine_level: int, purchase_cost: Optional[int] = None) -> int:
         """
         计算物品的系统售价。
 
@@ -414,6 +422,7 @@ class GameMechanicsService:
             item_type: 物品类型 ('rod', 'accessory')
             rarity: 物品稀有度
             refine_level: 物品精炼等级
+            purchase_cost: 商店售价。有售价时基础回收价不超过售价的一半，避免买了直接卖掉赚钱
 
         Returns:
             计算出的售价。
@@ -431,7 +440,10 @@ class GameMechanicsService:
             # 确保最低价格为 100
             base_price = max(100, base_price)
 
-        refine_multipliers = sell_price_config.get("refine_multiplier", {})
+        if purchase_cost and purchase_cost > 0:
+            base_price = min(base_price, max(1, purchase_cost // 2))
+
+        refine_multipliers= sell_price_config.get("refine_multiplier", {})
         refine_multiplier = refine_multipliers.get(str(refine_level), 1.0)
 
         final_price = int(base_price * refine_multiplier)

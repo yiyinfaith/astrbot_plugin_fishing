@@ -9,6 +9,14 @@
         "hint": "每次钓鱼后的冷却时间，单位为秒",
         "default": 180
       },
+      "auto_fishing_efficiency": {
+        "description": "自动钓鱼效率",
+        "type": "float",
+        "hint": "自动钓鱼的出竿间隔 = 冷却时间 ÷ 效率。默认 0.5 表示自动钓鱼的频率是手动连续钓鱼的一半，每天收益约为一半；1 表示和手动一样",
+        "default": 0.5,
+        "min": 0.05,
+        "max": 1.0
+      },
       "quality_bonus_max_chance": {
         "description": "高品质鱼最大触发概率",
         "type": "float",
@@ -62,6 +70,12 @@
         "default": 0.5,
         "min": 0.0,
         "max": 1.0
+      },
+      "failure_penalty_cap": {
+        "description": "电鱼失败最多扣除的金币",
+        "type": "int",
+        "hint": "按百分比算出的罚款超过这个数时按这个数扣，0 表示不封顶",
+        "default": 5000
       }
     }
   },
@@ -72,7 +86,7 @@
       "daily_reset_hour": {
         "description": "每日刷新时间点",
         "type": "int",
-        "hint": "每日重置稀有鱼配额、检查区域通行证的时间点（小时，0-23），默认为0表示0点刷新",
+        "hint": "每日刷新的时间点（小时，0-23），默认为0表示0点刷新。刷新时需要通行证的区域会自动续期或把玩家送回1号区域",
         "default": 0
       }
     }

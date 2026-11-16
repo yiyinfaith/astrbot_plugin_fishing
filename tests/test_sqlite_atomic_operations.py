@@ -131,9 +131,6 @@ class SqliteAtomicOperationTests(_ClosesConnectionsMixin, unittest.TestCase):
                     accessory_instance_id INTEGER PRIMARY KEY, user_id TEXT,
                     accessory_id INTEGER, is_equipped INTEGER, is_locked INTEGER
                 );
-                CREATE TABLE fishing_zones (
-                    id INTEGER PRIMARY KEY, rare_fish_caught_today INTEGER
-                );
                 CREATE TABLE fishing_records (
                     record_id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, fish_id INTEGER,
                     weight INTEGER, value INTEGER, rod_instance_id INTEGER,
@@ -148,7 +145,6 @@ class SqliteAtomicOperationTests(_ClosesConnectionsMixin, unittest.TestCase):
                 );
                 INSERT INTO users (user_id, coins, max_coins) VALUES ('u1', 100, 100);
                 INSERT INTO fish VALUES (1, 'fish', 4, 10);
-                INSERT INTO fishing_zones VALUES (1, 0);
                 """
             )
 
@@ -231,7 +227,7 @@ class SqliteAtomicOperationTests(_ClosesConnectionsMixin, unittest.TestCase):
                     user_id="u1", fish_id=1, total_catches=1, quality_level=0,
                     weight=20, base_value=10, earned_value=10, fishing_cost=10,
                     fish_pond_capacity=10, timestamp=__import__("datetime").datetime.now(),
-                    zone_id=1, is_rare=True, rod_instance_id=7,
+                    rod_instance_id=7,
                     rod_durability=4, rod_broken=False,
                     accessory_instance_id=None, bait_id=None,
                 )
@@ -239,7 +235,6 @@ class SqliteAtomicOperationTests(_ClosesConnectionsMixin, unittest.TestCase):
             with _sqlite(db_path) as conn:
                 self.assertEqual(conn.execute("SELECT coins FROM users").fetchone()[0], 100)
                 self.assertEqual(conn.execute("SELECT current_durability FROM user_rods").fetchone()[0], 5)
-                self.assertEqual(conn.execute("SELECT rare_fish_caught_today FROM fishing_zones").fetchone()[0], 0)
                 self.assertEqual(conn.execute("SELECT COUNT(*) FROM user_fish_inventory").fetchone()[0], 0)
                 self.assertEqual(conn.execute("SELECT total_fishing_count FROM users").fetchone()[0], 0)
 
