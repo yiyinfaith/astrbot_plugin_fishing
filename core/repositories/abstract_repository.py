@@ -329,11 +329,6 @@ class AbstractInventoryRepository(ABC):
     # 获取钓鱼区域信息
     @abstractmethod
     def get_zone_by_id(self, zone_id: int) -> FishingZone: pass
-    # 读写 db_meta 记录
-    @abstractmethod
-    def get_meta(self, key: str) -> Optional[str]: pass
-    @abstractmethod
-    def set_meta(self, key: str, value: str) -> None: pass
     # 设置区域需要的通行证
     @abstractmethod
     def set_zone_pass_requirement(self, zone_id: int, item_id: Optional[int]) -> None: pass

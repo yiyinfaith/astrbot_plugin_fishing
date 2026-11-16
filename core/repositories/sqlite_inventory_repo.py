@@ -764,18 +764,6 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
                 return zone
             else:
                 raise ValueError(f"钓鱼区域ID {zone_id} 不存在。")
-    def get_meta(self, key: str) -> Optional[str]:
-        """读取 db_meta 里的一项记录。"""
-        with self._connection_manager.get_connection() as conn:
-            row = conn.execute("SELECT value FROM db_meta WHERE key = ?", (key,)).fetchone()
-            return row[0] if row else None
-
-    def set_meta(self, key: str, value: str) -> None:
-        """写入 db_meta 里的一项记录。"""
-        with self._connection_manager.get_connection() as conn:
-            conn.execute("INSERT OR REPLACE INTO db_meta (key, value) VALUES (?, ?)", (key, value))
-            conn.commit()
-
     def set_zone_pass_requirement(self, zone_id: int, item_id: Optional[int]) -> None:
         """设置区域需要的通行证，item_id 为 None 表示不需要通行证。"""
         with self._connection_manager.get_connection() as conn:

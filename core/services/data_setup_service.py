@@ -352,7 +352,7 @@ class DataSetupService:
         if pass_id is not None and ZONE_PASS_NAME not in existing_item_names:
             created_item = self.shop_repo.create_shop_item(1, {
                 "name": ZONE_PASS_NAME,
-                "description": "进入区域三「传说之海」需要的通行证，有效到下次每日刷新。",
+                "description": "在区域三「传说之海」钓鱼的门票：每天第一次钓鱼时消耗 1 张，当天有效。",
                 "category": "basic",
                 "is_active": True,
                 "sort_order": 200,

@@ -628,7 +628,7 @@ function zonesView() {
     const fish = z.specific_fish_ids?.length ? `${z.specific_fish_ids.length} 种：${z.specific_fish_ids.slice(0, 4).map(fishName).join('、')}${z.specific_fish_ids.length > 4 ? '…' : ''}` : '全局鱼池';
     return `<tr><td>#${z.id}</td><td><strong>${esc(z.name)}</strong><span class="cell-sub">${esc(z.description || '')}</span></td><td>${yesNo(z.is_active, '开放', '关闭')}${z.available_from || z.available_until ? `<span class="cell-sub">${time(z.available_from)} ~ ${time(z.available_until)}</span>` : ''}</td><td class="num">${fmt(z.fishing_cost)}</td><td class="num">${z.required_rod_rarity ? `${z.required_rod_rarity} 星` : '不限'}</td><td class="wrap-text">${esc(dist)}<span class="cell-sub">${esc(fish)}</span></td><td>${z.requires_pass && z.required_item_id ? badge(itemName(z.required_item_id), 'warn') : badge('无需通行证', 'off')}</td><td>${rowActions([act('编辑', 'zone-edit', { id: z.id }), ...(z.id === 1 ? [] : [act('删除', 'zone-delete', { id: z.id, name: z.name }, true)])])}</td></tr>`;
   });
-  return shell('钓鱼区域', '玩家用“钓鱼区域 ID”切换区域；通行证在进入时消耗 1 张，有效到下次每日刷新。', `<div class="panel">${table(['ID', '区域', '状态', { label: '单次消耗', cls: 'num' }, { label: '鱼竿要求', cls: 'num' }, '稀有度分布 / 鱼池', '通行证', '操作'], rows, '还没有钓鱼区域。')}</div>`,
+  return shell('钓鱼区域', '玩家用“钓鱼区域 ID”切换区域；需要通行证的区域，玩家每天第一次在这里钓鱼时消耗 1 张，当天有效。', `<div class="panel">${table(['ID', '区域', '状态', { label: '单次消耗', cls: 'num' }, { label: '鱼竿要求', cls: 'num' }, '稀有度分布 / 鱼池', '通行证', '操作'], rows, '还没有钓鱼区域。')}</div>`,
   `<button type="button" class="btn primary" data-action="zone-create">${icon('plus')}新建区域</button>`);
 }
 
@@ -659,7 +659,7 @@ function zoneFormBody(z) {
     ${field({ name: 'available_from', label: '开放时间', type: 'datetime-local', value: toLocalInput(z.available_from) })}
     ${field({ name: 'available_until', label: '结束时间', type: 'datetime-local', value: toLocalInput(z.available_until) })}
     ${switchField({ name: 'requires_pass', label: '需要通行证', checked: !!z.requires_pass })}
-    ${selectField({ name: 'required_item_id', label: '通行证道具', choices: passItems, value: z.required_item_id ?? '', cls: 'wide', hint: '进入时消耗 1 个，每日刷新时自动再消耗 1 个续期' })}
+    ${selectField({ name: 'required_item_id', label: '通行证道具', choices: passItems, value: z.required_item_id ?? '', cls: 'wide', hint: '每天第一次在这里钓鱼时消耗 1 个，当天有效' })}
   </div>
   <div class="modal-section">稀有度分布 <span class="hint" id="dist-sum"></span></div>
   <div class="form-grid three" data-dist>${dist.slice(0, 6).map((v, i) => field({ name: `rarity_${i}`, label: i < 5 ? `${i + 1} 星` : '6 星及以上', type: 'number', min: 0, max: 1, step: 'any', value: v })).join('')}</div>

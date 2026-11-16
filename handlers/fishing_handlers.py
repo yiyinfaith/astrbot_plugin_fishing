@@ -38,8 +38,16 @@ def _build_fish_message(result, fishing_cost):
         if "equipment_broken_messages" in result:
             for broken_msg in result["equipment_broken_messages"]:
                 message += f"\n{broken_msg}"
+        for notice in result.get("notices") or []:
+            message += f"\n{notice}"
         return message
-    return f"{result['message']}\n💸消耗：{fishing_cost} 金币/次"
+    if result.get("zone_requirement_failed"):
+        # 没满足区域条件，这一竿没有钓，也没有扣钱
+        return result["message"]
+    message = f"{result['message']}\n💸消耗：{fishing_cost} 金币/次"
+    for notice in result.get("notices") or []:
+        message += f"\n{notice}"
+    return message
 
 
 class FishingHandlers:
@@ -121,7 +129,7 @@ class FishingHandlers:
                     message += f"🎣 需要装备 {zone['required_rod_rarity']} 星及以上的鱼竿\n"
                 if zone.get("requires_pass"):
                     required_item_name = zone.get("required_item_name", "通行证")
-                    message += f"🔑 进入时消耗 1 个 {required_item_name}，有效到下次每日刷新\n"
+                    message += f"🔑 需要 {required_item_name}：每天第一次在这里钓鱼时消耗 1 个，当天有效\n"
                 if zone.get("available_from") or zone.get("available_until"):
                     message += "⏰ 开放时间: "
                     if zone.get("available_from") and zone.get("available_until"):

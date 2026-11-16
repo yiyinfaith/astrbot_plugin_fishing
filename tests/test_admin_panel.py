@@ -255,7 +255,7 @@ class DatabaseSchemaTests(unittest.TestCase):
     def test_schema_scripts(self):
         # 1.0.0 起只有新结构的脚本，没有兼容旧版的迁移
         scripts = sorted(p.name for p in (PLUGIN_DIR / "core" / "database" / "migrations").glob("[0-9][0-9][0-9]_*.py"))
-        self.assertEqual(scripts, ["001_initial_schema.py", "002_rule_adjustments.py"])
+        self.assertEqual(scripts, ["001_initial_schema.py", "002_rule_adjustments.py", "003_economy_tuning.py"])
 
     def test_fresh_database_has_no_legacy_tables_or_columns(self):
         self.migration.run_migrations(str(self.db), self.migrations_dir)
@@ -266,7 +266,7 @@ class DatabaseSchemaTests(unittest.TestCase):
         for name in columns:
             self.assertFalse(re.search(r"wipe_bomb|wof_|wheel_of_fate|sicbo|exchange", name), name)
         self.assertEqual(conn.execute("SELECT COUNT(*) FROM fishing_zones").fetchone()[0], 3)
-        self.assertEqual(conn.execute("SELECT version FROM schema_version").fetchone()[0], 2)
+        self.assertEqual(conn.execute("SELECT version FROM schema_version").fetchone()[0], 3)
         zone_columns = {r[1] for r in conn.execute("PRAGMA table_info(fishing_zones)")}
         self.assertFalse({"daily_rare_fish_quota", "rare_fish_caught_today"} & zone_columns)
         self.assertIn("required_rod_rarity", zone_columns)

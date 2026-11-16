@@ -5,7 +5,6 @@ import shutil
 import sqlite3
 import tempfile
 import unittest
-from datetime import timedelta
 from pathlib import Path
 
 import astrbot_stub
@@ -72,6 +71,7 @@ class GameRuleTests(unittest.TestCase):
         result = self.plugin.shop_service.purchase_item(uid, self.shop_item("新手木竿"), 10)
         self.assertTrue(result["success"], result)
         self.assertEqual(self.coins(uid), 4500)
+        # 送的那根已装备，不会被一起卖掉
         self.plugin.inventory_service.sell_all_rods(uid)
         self.assertEqual(self.coins(uid), 4750)
 
@@ -84,44 +84,65 @@ class GameRuleTests(unittest.TestCase):
                 if item.item_type == "coins" and pool.cost_coins:
                     self.assertLess(item.quantity, pool.cost_coins, pool.name)
 
-    # 3. 区域二要 2 星鱼竿，区域三要通行证（商店有售，进入时消耗）
+    # 3. 区域二要 2 星鱼竿，区域三要 3 星鱼竿和通行证
     def test_zone_gates(self):
+        service = self.plugin.fishing_service
         uid = self.new_user(coins=100000)
-        result = self.plugin.fishing_service.set_user_fishing_zone(uid, 2)
+        result = service.set_user_fishing_zone(uid, 2)
         self.assertFalse(result["success"])
         self.assertIn("2 星", result["message"])
         self.give_and_equip_rod(uid, "竹制鱼竿")
-        self.assertTrue(self.plugin.fishing_service.set_user_fishing_zone(uid, 2)["success"])
+        self.assertTrue(service.set_user_fishing_zone(uid, 2)["success"])
 
-        self.assertFalse(self.plugin.fishing_service.set_user_fishing_zone(uid, 3)["success"])
-        pass_offer = self.shop_item(PASS_NAME)
-        self.assertTrue(self.plugin.shop_service.purchase_item(uid, pass_offer, 2)["success"])
-        self.assertEqual(self.coins(uid), 60000)
+        self.assertIn("3 星", service.set_user_fishing_zone(uid, 3)["message"])
+        self.give_and_equip_rod(uid, "碳素纤维竿")
+        self.assertIn("通行证", service.set_user_fishing_zone(uid, 3)["message"])
+        self.assertTrue(self.plugin.shop_service.purchase_item(uid, self.shop_item(PASS_NAME), 2)["success"])
+        self.assertEqual(self.coins(uid), 96000)
+        # 进入时不消耗
+        self.assertTrue(service.set_user_fishing_zone(uid, 3)["success"])
         self.assertEqual(self.pass_count(uid), 2)
-        self.assertTrue(self.plugin.fishing_service.set_user_fishing_zone(uid, 3)["success"])
-        self.assertEqual(self.pass_count(uid), 1)
-        # 已经在这里，再切换一次不会多扣通行证
-        self.assertFalse(self.plugin.fishing_service.set_user_fishing_zone(uid, 3)["success"])
-        self.assertEqual(self.pass_count(uid), 1)
+        self.assertFalse(service.set_user_fishing_zone(uid, 3)["success"])
 
-    # 3. 每日刷新：有通行证就续期，没有就回到 1 号区域
-    def test_daily_pass_renewal(self):
+    # 3. 通行证在当天第一次钓鱼时消耗，当天有效；没有通行证这一竿不钓也不扣钱
+    def test_pass_is_used_once_per_day(self):
         service = self.plugin.fishing_service
-        keep, leave = self.new_user(coins=100000), self.new_user(coins=100000)
-        offer = self.shop_item(PASS_NAME)
-        self.plugin.shop_service.purchase_item(keep, offer, 2)
-        self.plugin.shop_service.purchase_item(leave, offer, 1)
-        for uid in (keep, leave):
-            self.assertTrue(service.set_user_fishing_zone(uid, 3)["success"])
+        uid = self.new_user(coins=100000)
+        self.give_and_equip_rod(uid, "碳素纤维竿")
+        self.plugin.shop_service.purchase_item(uid, self.shop_item(PASS_NAME), 1)
+        self.assertTrue(service.set_user_fishing_zone(uid, 3)["success"])
 
-        service.last_reset_time -= timedelta(days=1)
-        self.assertTrue(service._run_daily_tasks_if_due())
-        self.assertFalse(service._run_daily_tasks_if_due())
-        self.assertEqual(self.plugin.user_repo.get_by_id(keep).fishing_zone_id, 3)
-        self.assertEqual(self.pass_count(keep), 0)
-        self.assertEqual(self.plugin.user_repo.get_by_id(leave).fishing_zone_id, 1)
-        # 刷新时间点记在数据库里，重载后不会重复执行
-        self.assertEqual(service._load_last_reset_time(), service.last_reset_time)
+        first = service.go_fish(uid)
+        self.assertIn("已使用 1 个", "".join(first.get("notices", [])))
+        self.assertEqual(self.pass_count(uid), 0)
+        for _ in range(3):
+            self.assertFalse(service.go_fish(uid).get("zone_requirement_failed"))
+        self.assertEqual(self.pass_count(uid), 0)
+
+        # 到了第二天：标记过期，背包里没有通行证
+        with self.plugin.buff_repo._get_connection() as conn:
+            conn.execute("UPDATE user_buffs SET expires_at = '2000-01-01 00:00:00' WHERE user_id = ?", (uid,))
+            conn.commit()
+        coins = self.coins(uid)
+        blocked = service.go_fish(uid)
+        self.assertTrue(blocked["zone_requirement_failed"])
+        self.assertEqual(self.coins(uid), coins)
+
+        # 自动钓鱼遇到这种情况会回到新手港湾继续钓
+        user = self.plugin.user_repo.get_by_id(uid)
+        user.last_fishing_time = None
+        self.plugin.user_repo.update(user)
+        service._process_auto_fishing_user(uid)
+        self.assertEqual(self.plugin.user_repo.get_by_id(uid).fishing_zone_id, 1)
+
+    # 10. 新手木竿永久耐久，注册时免费送并装备
+    def test_starter_rod(self):
+        uid = self.new_user()
+        rods = self.inventory.get_user_rod_instances(uid)
+        self.assertEqual(len(rods), 1)
+        self.assertTrue(rods[0].is_equipped)
+        self.assertIsNone(rods[0].current_durability)
+        self.assertEqual(self.inventory.get_user_equipped_rod(uid).rod_instance_id, rods[0].rod_instance_id)
 
     # 4. 区域三有 6 星以上的概率，星级越高越难出
     def test_zone_three_can_yield_mythic_fish(self):
@@ -143,6 +164,7 @@ class GameRuleTests(unittest.TestCase):
         self.assertNotIn("rare_fish_caught_today", columns)
         uid = self.new_user(coins=1000)
         result = self.plugin.fishing_service.go_fish(uid)
+        self.assertNotIn("zone_requirement_failed", result)
         self.assertIn("message" if not result["success"] else "fish", result)
 
     # 6 与 12. 自动钓鱼按效率放慢；冷却倍率来自饰品属性而不是名字
@@ -186,11 +208,13 @@ class GameRuleTests(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertGreaterEqual(self.coins(thief), 1_000_000 - 5000)
 
-    # 10. 所有内置鱼竿都有耐久
-    def test_all_rods_have_durability(self):
+    # 10. 除了新手木竿，内置鱼竿都有耐久
+    def test_rod_durability(self):
         for rod in self.templates.get_all_rods():
-            self.assertIsNotNone(rod.durability, rod.name)
-            self.assertGreater(rod.durability, 0, rod.name)
+            if rod.name == "新手木竿":
+                self.assertIsNone(rod.durability)
+            else:
+                self.assertGreater(rod.durability or 0, 0, rod.name)
 
 
 class UpgradeMigrationTests(unittest.TestCase):
@@ -219,7 +243,7 @@ class UpgradeMigrationTests(unittest.TestCase):
         conn.executescript(f"""
             INSERT INTO rods (rod_id, name, rarity, source, durability) VALUES (1, '新手木竿', 1, 'shop', NULL),
                 (5, '海神之赐', 5, 'gacha', NULL), (6, '自定义竿', 2, 'shop', NULL);
-            INSERT INTO users (user_id, nickname) VALUES ('u', 'u');
+            INSERT INTO users (user_id, nickname) VALUES ('u', 'u'), ('v', 'v');
             INSERT INTO user_rods (user_id, rod_id, refine_level) VALUES ('u', 1, 2), ('u', 5, 10);
             INSERT INTO items (item_id, name, rarity, effect_description) VALUES (5, '{PASS_NAME}', 5, '进入特定钓鱼区域时自动消耗。');
             INSERT INTO items (item_id, name, rarity) VALUES (2, '幸运药水', 3);
@@ -236,9 +260,9 @@ class UpgradeMigrationTests(unittest.TestCase):
         self.migration.run_migrations(str(self.db), str(self.migrations_dir))
         conn = sqlite3.connect(self.db)
         q = lambda sql, *a: conn.execute(sql, a).fetchall()
-        self.assertEqual(q("SELECT version FROM schema_version")[0][0], 2)
-        self.assertEqual(dict(q("SELECT name, durability FROM rods")), {"新手木竿": 200, "海神之赐": 3000, "自定义竿": None})
-        self.assertEqual(sorted(q("SELECT rod_id, current_durability FROM user_rods")), [(1, 300), (5, None)])
+        self.assertEqual(q("SELECT version FROM schema_version")[0][0], 3)
+        self.assertEqual(dict(q("SELECT name, durability FROM rods")), {"新手木竿": None, "海神之赐": 3000, "自定义竿": None})
+        self.assertEqual(sorted(q("SELECT rod_id, current_durability FROM user_rods WHERE user_id = 'u'")), [(1, None), (5, None)])
         self.assertEqual(q("SELECT quantity FROM gacha_pool_items WHERE gacha_pool_id = 1")[0][0], 2000)
         # 管理员改过的数量不动
         self.assertEqual(q("SELECT quantity FROM gacha_pool_items WHERE gacha_pool_id = 2")[0][0], 15000)
@@ -247,11 +271,18 @@ class UpgradeMigrationTests(unittest.TestCase):
         self.assertEqual(q("SELECT is_active FROM shops WHERE shop_id = 2")[0][0], 0)
         offer = q("SELECT item_id FROM shop_items WHERE shop_id = 1 AND name = ?", PASS_NAME)
         self.assertEqual(len(offer), 1)
-        self.assertEqual(q("SELECT cost_amount FROM shop_item_costs WHERE item_id = ?", offer[0][0])[0][0], 20000)
-        zones = {r[0]: r[1:] for r in q("SELECT id, required_rod_rarity, requires_pass, required_item_id, configs FROM fishing_zones")}
+        self.assertEqual(q("SELECT cost_amount FROM shop_item_costs WHERE item_id = ?", offer[0][0])[0][0], 2000)
+        zones = {r[0]: r[1:] for r in q("SELECT id, required_rod_rarity, requires_pass, required_item_id, configs, fishing_cost FROM fishing_zones")}
         self.assertEqual(zones[2][0], 2)
-        self.assertEqual(zones[3][1:3], (1, 5))
-        self.assertIn("0.005", zones[3][3])
+        self.assertEqual(zones[2][4], 50)
+        self.assertEqual(zones[3][:3], (3, 1, 5))
+        self.assertIn("0.48", zones[3][3])
+        self.assertEqual(zones[3][4], 120)
+        # 没有新手木竿的玩家补发一根并装备
+        given = q("SELECT rod_instance_id, current_durability, is_equipped FROM user_rods WHERE user_id = 'v'")
+        self.assertEqual([(g[1], g[2]) for g in given], [(None, 1)])
+        self.assertEqual(q("SELECT equipped_rod_instance_id FROM users WHERE user_id = 'v'")[0][0], given[0][0])
+        self.assertEqual(q("SELECT COUNT(*) FROM db_meta WHERE key = 'daily_reset_at'")[0][0], 0)
         conn.close()
 
 

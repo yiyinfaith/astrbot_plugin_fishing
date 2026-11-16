@@ -69,10 +69,26 @@ class UserService:
             created_at=get_now()
         )
         self.user_repo.add(new_user)
+        rod_name = self._grant_starter_rod(user_id)
+        rod_text = f"和一根永不损坏的【{rod_name}】（已装备）" if rod_name else ""
         return {
             "success": True,
-            "message": f"注册成功！欢迎 {nickname} 🎉 你获得了 {initial_coins} 金币作为起始资金。"
+            "message": f"注册成功！欢迎 {nickname} 🎉 你获得了 {initial_coins} 金币作为起始资金{rod_text}。"
         }
+
+    def _grant_starter_rod(self, user_id: str) -> Optional[str]:
+        """新玩家免费获得一根新手鱼竿并自动装备，返回鱼竿名称。"""
+        from ..initial_data import STARTER_ROD_NAME
+        rod = next((r for r in self.item_template_repo.get_all_rods() if r.name == STARTER_ROD_NAME), None)
+        if not rod:
+            return None
+        instance = self.inventory_repo.add_rod_instance(user_id, rod.rod_id, rod.durability)
+        self.inventory_repo.set_equipment_status(user_id, rod_instance_id=instance.rod_instance_id)
+        user = self.user_repo.get_by_id(user_id)
+        if user:
+            user.equipped_rod_instance_id = instance.rod_instance_id
+            self.user_repo.update(user)
+        return rod.name
 
     def create_user_for_admin(self, data: Dict[str, Any]) -> Dict[str, Any]:
         user_id = data.get("user_id")
@@ -95,6 +111,7 @@ class UserService:
             created_at=get_now()
         )
         self.user_repo.add(new_user)
+        self._grant_starter_rod(user_id)
 
         allowed_fields = {
             'nickname', 'coins', 'premium_currency', 'total_fishing_count',
