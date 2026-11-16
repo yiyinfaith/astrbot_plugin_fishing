@@ -101,4 +101,4 @@ AstrBot 钓鱼养成游戏：钓鱼、鱼塘与水族箱、装备精炼、商店
 
 ## 参考与许可
 
-基于 [AstrBot](https://github.com/AstrBotDevs/AstrBot) 插件接口开发，原作 [0xNMLSS](https://github.com/0xNMLSS/astrbot_plugin_fishing)、[xxlemon-io](https://github.com/xxlemon-io/astrbot_plugin_fishing)、[Akiyo-dayo](https://github.com/Akiyo-dayo/astrbot_plugin_fishing)。以 [AGPL-3.0](LICENSE) 许可发布。
+基于 [AstrBot](https://github.com/AstrBotDevs/AstrBot) 插件接口开发，参考项目： [0xNMLSS](https://github.com/0xNMLSS/astrbot_plugin_fishing)、[xxlemon-io](https://github.com/xxlemon-io/astrbot_plugin_fishing)、[Akiyo-dayo](https://github.com/Akiyo-dayo/astrbot_plugin_fishing)。以 [AGPL-3.0](LICENSE) 许可发布，感谢原作者。
