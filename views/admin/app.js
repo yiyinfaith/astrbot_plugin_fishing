@@ -59,7 +59,7 @@ const icon = name => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><
 
 const TYPE_LABELS = { fish: '鱼类', rod: '鱼竿', bait: '鱼饵', accessory: '饰品', item: '道具', coins: '金币', premium: '高级货币', titles: '称号' };
 const SHOP_TYPES = { normal: '普通商店', premium: '高级商店', limited: '限时商店' };
-const SYSTEM_USERS = new Set(['MARKET', 'SYSTEM']);
+const SYSTEM_USERS = new Set(['MARKET']);
 const SENTIMENT = { panic: '恐慌', pessimistic: '悲观', neutral: '中性', optimistic: '乐观', euphoric: '狂热' };
 const TREND = { rising: '上涨', falling: '下跌', stable: '平稳', volatile: '震荡' };
 

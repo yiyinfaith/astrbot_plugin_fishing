@@ -6,7 +6,9 @@ AstrBot 钓鱼养成游戏：钓鱼、鱼塘与水族箱、装备精炼、商店
 
 ## 安装
 
-在 AstrBot 插件市场安装，或把仓库放到 `data/plugins/astrbot_plugin_fishing` 后安装 `requirements.txt` 并重载插件。数据保存在 `data/plugin_data/astrbot_plugin_fishing/fish.db`，可直接沿用原插件的 `fish.db` 存档；存档里银行活期、定期中的金币，以及交易所持仓和市场上的大宗商品挂单，会在首次加载时折成金币退回玩家钱包。
+在 AstrBot 插件市场安装，或把仓库放到 `data/plugins/astrbot_plugin_fishing` 后安装 `requirements.txt` 并重载插件。数据保存在 `data/plugin_data/astrbot_plugin_fishing/fish.db`，首次启动时自动建库。
+
+本插件不兼容原插件和旧版本的存档：启动时如果发现旧版 `fish.db`，会把它改名为 `fish.db.legacy-<时间>` 留作备份，然后新建空库。
 
 ## 指令
 

@@ -1,9 +1,16 @@
-import sqlite3
+import importlib.util
 import os
 import re
-import importlib.util
+import sqlite3
+from contextlib import closing
+from datetime import datetime
+from typing import Optional
 
 from astrbot.api import logger
+
+# 与 migrations/001_initial_schema.py 中的 SCHEMA_MARK 保持一致
+SCHEMA_MARK = "fishing-1.0"
+
 
 def get_current_version(cursor: sqlite3.Cursor) -> int:
     """获取当前数据库的版本号。"""
@@ -20,10 +27,43 @@ def set_version(cursor: sqlite3.Cursor, version: int):
     cursor.execute("UPDATE schema_version SET version = ?", (version,))
 
 
+def _is_legacy_database(db_path: str) -> bool:
+    """有数据表却没有 1.0.0 结构标记的库来自旧版插件。"""
+    if not os.path.exists(db_path):
+        return False
+    with closing(sqlite3.connect(db_path)) as conn:
+        tables = {
+            row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+            )
+        }
+        if not tables - {"schema_version"}:
+            return False
+        if "db_meta" not in tables:
+            return True
+        row = conn.execute("SELECT value FROM db_meta WHERE key = 'schema'").fetchone()
+        return not row or row[0] != SCHEMA_MARK
+
+
+def retire_legacy_database(db_path: str) -> Optional[str]:
+    """旧版插件的库结构不兼容：改名留作备份，之后会新建空库。返回备份路径。"""
+    if not _is_legacy_database(db_path):
+        return None
+    stamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    backup = f"{db_path}.legacy-{stamp}"
+    os.replace(db_path, backup)
+    for suffix in ("-wal", "-shm"):
+        if os.path.exists(db_path + suffix):
+            os.replace(db_path + suffix, backup + suffix)
+    logger.warning(f"检测到旧版插件的数据库，结构不兼容，已改名为 {backup} 并新建数据库。")
+    return backup
+
+
 def run_migrations(db_path: str, migrations_dir: str):
     """
     运行所有待处理的数据库迁移脚本。
     """
+    retire_legacy_database(db_path)
 
     # 确保版本表存在
     with sqlite3.connect(db_path) as conn:

@@ -1,4 +1,4 @@
-"""1.0.0 改造的回归测试：管理员指令下线、玩法与银行税收删除、面板接口与新库初始化。"""
+"""1.0.0 回归测试：管理员指令下线、已删玩法、面板接口与数据库结构。"""
 
 import asyncio
 import json
@@ -133,7 +133,7 @@ class AdminApiTests(unittest.TestCase):
             self.call(self.api.user_currency, body={"user_id": "nobody", "currency": "coins", "mode": "add", "amount": 1})
 
     def test_broadcast_skips_system_accounts(self):
-        before = {uid: self.plugin.user_repo.get_by_id(uid) for uid in ("SYSTEM", "MARKET")}
+        before = {uid: self.plugin.user_repo.get_by_id(uid) for uid in ("MARKET",)}
         result = self.call(self.api.broadcast_currency, body={"currency": "premium_currency", "mode": "add", "amount": 7})
         self.assertEqual(result["affected"], 2)
         for uid, user in before.items():
@@ -228,90 +228,60 @@ class AdminApiTests(unittest.TestCase):
             json.dumps(self.call(fn, query=query), ensure_ascii=False)
 
 
-class MigrationTests(unittest.TestCase):
-    def test_049_keeps_titles_that_players_own(self):
+class DatabaseSchemaTests(unittest.TestCase):
+    LEGACY_TABLES = {
+        "bank_accounts", "bank_fixed_deposits", "bank_transactions", "bank_withdraw_reservations",
+        "tax_debts", "taxes", "commodities", "exchange_prices", "user_commodities",
+        "loans", "red_packets", "red_packet_records", "wipe_bomb_log",
+    }
+
+    def setUp(self):
         astrbot_stub.install(Path(tempfile.mkdtemp()))
-        import importlib.util
-        path = PLUGIN_DIR / "core" / "database" / "migrations" / "049_remove_disabled_game_content.py"
-        spec = importlib.util.spec_from_file_location("m049", path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        conn = sqlite3.connect(":memory:")
-        cur = conn.cursor()
-        cur.executescript("""
-            CREATE TABLE titles (title_id INTEGER PRIMARY KEY, name TEXT);
-            CREATE TABLE user_titles (user_id TEXT, title_id INTEGER);
-            CREATE TABLE users (user_id TEXT, current_title_id INTEGER);
-            CREATE TABLE items (item_id INTEGER PRIMARY KEY, name TEXT, effect_type TEXT);
-            CREATE TABLE user_items (user_id TEXT, item_id INTEGER, quantity INTEGER);
-            INSERT INTO titles VALUES (6, '擦弹之王'), (20, 'Lucky'), (1, '钓鱼新手');
-            INSERT INTO user_titles VALUES ('u', 20);
-            INSERT INTO items VALUES (1, '许可证', 'WIPE_BOMB_ATTEMPTS_BOOST'), (2, '沙漏', 'FORECAST_WIPE_BOMB'), (3, '钱袋', 'ADD_COINS');
-            INSERT INTO user_items VALUES ('u', 2, 1);
-        """)
-        module.up(cur)
-        self.assertEqual([r[0] for r in cur.execute("SELECT title_id FROM titles ORDER BY title_id")], [1, 20])
-        self.assertEqual([r[0] for r in cur.execute("SELECT item_id FROM items ORDER BY item_id")], [2, 3])
+        import importlib
+        import sys
+        sys.path.insert(0, str(PLUGIN_DIR.parent))
+        self.migration = importlib.import_module(f"{PLUGIN_DIR.name}.core.database.migration")
+        self.migrations_dir = str(PLUGIN_DIR / "core" / "database" / "migrations")
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.db = Path(self.tmp.name) / "fish.db"
 
-    def test_050_refunds_bank_money_to_wallet(self):
-        import importlib.util
-        path = PLUGIN_DIR / "core" / "database" / "migrations" / "050_refund_bank_balances.py"
-        spec = importlib.util.spec_from_file_location("m050", path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        conn = sqlite3.connect(":memory:")
-        cur = conn.cursor()
-        cur.executescript("""
-            CREATE TABLE users (user_id TEXT PRIMARY KEY, coins INTEGER, max_coins INTEGER);
-            CREATE TABLE bank_accounts (user_id TEXT PRIMARY KEY, balance INTEGER, locked_balance INTEGER);
-            CREATE TABLE bank_fixed_deposits (deposit_id INTEGER PRIMARY KEY, user_id TEXT, principal INTEGER,
-                expected_interest INTEGER, status TEXT, matures_at DATETIME, completed_at DATETIME);
-            CREATE TABLE bank_withdraw_reservations (reservation_id INTEGER PRIMARY KEY, user_id TEXT, status TEXT);
-            INSERT INTO users VALUES ('a', 100, 100), ('b', 5, 50);
-            INSERT INTO bank_accounts VALUES ('a', 1000, 300), ('b', 0, 0);
-            INSERT INTO bank_fixed_deposits VALUES
-                (1, 'a', 500, 50, 'active', '2000-01-01 00:00:00', NULL),
-                (2, 'b', 200, 20, 'active', '2999-01-01 00:00:00', NULL),
-                (3, 'b', 999, 99, 'completed', '2000-01-01 00:00:00', NULL);
-            INSERT INTO bank_withdraw_reservations VALUES (1, 'a', 'pending');
-        """)
-        module.up(cur)
-        coins = dict(cur.execute("SELECT user_id, coins FROM users"))
-        self.assertEqual(coins, {"a": 100 + 1000 + 550, "b": 5 + 200})
-        self.assertEqual(cur.execute("SELECT max_coins FROM users WHERE user_id = 'a'").fetchone()[0], 1650)
-        self.assertEqual(cur.execute("SELECT SUM(balance) + SUM(locked_balance) FROM bank_accounts").fetchone()[0], 0)
-        self.assertEqual(cur.execute("SELECT COUNT(*) FROM bank_fixed_deposits WHERE status = 'active'").fetchone()[0], 0)
-        self.assertEqual(cur.execute("SELECT status FROM bank_withdraw_reservations").fetchone()[0], "cancelled")
+    def tearDown(self):
+        self.tmp.cleanup()
 
-    def test_051_refunds_exchange_holdings(self):
-        import importlib.util
-        path = PLUGIN_DIR / "core" / "database" / "migrations" / "051_refund_exchange_holdings.py"
-        spec = importlib.util.spec_from_file_location("m051", path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        conn = sqlite3.connect(":memory:")
-        cur = conn.cursor()
-        cur.executescript("""
-            CREATE TABLE users (user_id TEXT PRIMARY KEY, coins INTEGER, max_coins INTEGER);
-            CREATE TABLE exchange_prices (price_id INTEGER PRIMARY KEY, date TEXT, time TEXT, commodity_id TEXT, price INTEGER);
-            CREATE TABLE user_commodities (instance_id INTEGER PRIMARY KEY, user_id TEXT, commodity_id TEXT, quantity INTEGER,
-                purchase_price INTEGER, purchased_at TEXT, expires_at TEXT);
-            CREATE TABLE market (market_id INTEGER PRIMARY KEY, user_id TEXT, item_type TEXT, item_id, quantity INTEGER,
-                price INTEGER, expires_at DATETIME);
-            INSERT INTO users VALUES ('a', 0, 0), ('b', 10, 10);
-            INSERT INTO exchange_prices VALUES (1, '2026-11-01', '09:00:00', 'dried_fish', 5000),
-                (2, '2026-11-02', '09:00:00', 'dried_fish', 6000);
-            INSERT INTO user_commodities VALUES (1, 'a', 'dried_fish', 2, 1000, '2026-11-01', '2999-01-01T00:00:00'),
-                (2, 'a', 'dried_fish', 5, 1000, '2026-11-01', '2000-01-01T00:00:00'),
-                (3, 'b', 'fish_oil', 3, 700, '2026-11-01', '2999-01-01T00:00:00');
-            INSERT INTO market VALUES (1, 'b', 'commodity', 'dried_fish', 1, 99999, '2999-01-01 00:00:00'),
-                (2, 'b', 'item', 3, 1, 50, NULL);
+    def test_single_schema_script(self):
+        scripts = sorted(p.name for p in (PLUGIN_DIR / "core" / "database" / "migrations").glob("[0-9][0-9][0-9]_*.py"))
+        self.assertEqual(scripts, ["001_initial_schema.py"])
+
+    def test_fresh_database_has_no_legacy_tables_or_columns(self):
+        self.migration.run_migrations(str(self.db), self.migrations_dir)
+        conn = sqlite3.connect(self.db)
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        self.assertFalse(tables & self.LEGACY_TABLES)
+        columns = {r[1] for r in conn.execute("PRAGMA table_info(users)")}
+        for name in columns:
+            self.assertFalse(re.search(r"wipe_bomb|wof_|wheel_of_fate|sicbo|exchange", name), name)
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM fishing_zones").fetchone()[0], 3)
+        self.assertEqual(conn.execute("SELECT version FROM schema_version").fetchone()[0], 1)
+        conn.close()
+        # 再跑一次不会把自己当成旧库
+        self.assertIsNone(self.migration.retire_legacy_database(str(self.db)))
+
+    def test_legacy_database_is_set_aside(self):
+        conn = sqlite3.connect(self.db)
+        conn.executescript("""
+            CREATE TABLE schema_version (version INTEGER NOT NULL PRIMARY KEY);
+            INSERT INTO schema_version VALUES (51);
+            CREATE TABLE users (user_id TEXT PRIMARY KEY, coins INTEGER);
+            INSERT INTO users VALUES ('old', 5);
         """)
-        module.up(cur)
-        coins = dict(cur.execute("SELECT user_id, coins FROM users"))
-        self.assertEqual(coins, {"a": 12000, "b": 10 + 2100 + 6000})
-        self.assertEqual(cur.execute("SELECT COUNT(*) FROM user_commodities").fetchone()[0], 0)
-        self.assertEqual([r[0] for r in cur.execute("SELECT item_type FROM market")], ["item"])
+        conn.close()
+        self.migration.run_migrations(str(self.db), self.migrations_dir)
+        backups = list(Path(self.tmp.name).glob("fish.db.legacy-*"))
+        self.assertEqual(len([b for b in backups if not b.name.endswith(("-wal", "-shm"))]), 1)
+        conn = sqlite3.connect(self.db)
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM users").fetchone()[0], 0)
+        self.assertEqual(conn.execute("SELECT value FROM db_meta WHERE key = 'schema'").fetchone()[0], "fishing-1.0")
+        conn.close()
 
 
 if __name__ == "__main__":

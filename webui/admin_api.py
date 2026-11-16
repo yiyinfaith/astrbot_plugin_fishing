@@ -23,7 +23,7 @@ from typing import Any, Callable, Dict, List, Optional
 from astrbot.api import logger
 
 # 市场托管与系统账号不参与全体发放/扣除
-SYSTEM_USER_IDS = {"MARKET", "SYSTEM"}
+SYSTEM_USER_IDS = {"MARKET"}
 
 ITEM_TYPE_LABELS = {
     "fish": "鱼类",
