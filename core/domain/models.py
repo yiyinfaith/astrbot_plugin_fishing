@@ -326,18 +326,6 @@ class MarketListing:
         return getattr(self, item)
 
 @dataclass
-class TaxRecord:
-    """一条税收记录"""
-    tax_id: int
-    user_id: str
-    tax_amount: int
-    tax_rate: float
-    original_amount: int
-    balance_after: int
-    timestamp: datetime
-    tax_type: str = "daily"
-
-@dataclass
 class FishingZone:
     id: int
     name: str

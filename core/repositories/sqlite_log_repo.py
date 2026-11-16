@@ -5,23 +5,16 @@ from datetime import date, datetime, timedelta, timezone
 from astrbot.api import logger
 # 导入抽象基类和领域模型
 from .abstract_repository import AbstractLogRepository
-from ..domain.models import FishingRecord, GachaRecord, TaxRecord, UserFishStat
+from ..domain.models import FishingRecord, GachaRecord, UserFishStat
 
 class SqliteLogRepository(AbstractLogRepository):
     """日志类数据仓储的SQLite实现"""
 
-    def __init__(self, db_path: str, tax_record_retention_days: int = 90, tax_record_cleanup_batch_size: int = 1000):
+    def __init__(self, db_path: str):
         self.db_path = db_path
         self._local = threading.local()
         # 定义UTC+8时区
         self.UTC8 = timezone(timedelta(hours=8))
-        self.tax_record_retention_days = int(tax_record_retention_days)
-        self.tax_record_cleanup_batch_size = int(tax_record_cleanup_batch_size)
-
-    def set_tax_record_retention(self, retention_days: int, cleanup_batch_size: int = 1000) -> None:
-        self.tax_record_retention_days = int(retention_days)
-        self.tax_record_cleanup_batch_size = int(cleanup_batch_size)
-
     def _get_connection(self) -> sqlite3.Connection:
         """获取一个线程安全的数据库连接。"""
         conn = getattr(self._local, "connection", None)
@@ -51,11 +44,6 @@ class SqliteLogRepository(AbstractLogRepository):
         if not row:
             return None
         return GachaRecord(**row)
-
-    def _row_to_tax_record(self, row: sqlite3.Row) -> Optional[TaxRecord]:
-        if not row:
-            return None
-        return TaxRecord(**row)
 
     # --- Fishing Log Methods ---
     def add_fishing_record(self, record: FishingRecord) -> bool:
@@ -273,179 +261,6 @@ class SqliteLogRepository(AbstractLogRepository):
     def add_log(self, user_id: str, log_type: str, message: str) -> None:
         """记录一条通用事件日志（只写入 AstrBot 日志，不落库）。"""
         logger.info(f"[钓鱼][{log_type}] {user_id}: {message}")
-
-    # --- Tax Log Methods ---
-    def add_tax_record(self, record: TaxRecord) -> None:
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            # 1) 写入税收记录
-            cursor.execute(
-                """
-                INSERT INTO taxes
-                    (user_id, tax_amount, tax_rate, original_amount, balance_after, tax_type, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    record.user_id,
-                    record.tax_amount,
-                    record.tax_rate,
-                    record.original_amount,
-                    record.balance_after,
-                    record.tax_type,
-                    record.timestamp or datetime.now(self.UTC8),
-                ),
-            )
-
-            self._cleanup_old_tax_records(cursor)
-            conn.commit()
-
-    def _cleanup_old_tax_records(self, cursor: sqlite3.Cursor) -> int:
-        retention_days = max(self.tax_record_retention_days, 0)
-        batch_size = max(self.tax_record_cleanup_batch_size, 1)
-        if retention_days <= 0:
-            return 0
-        cutoff_time = datetime.now(self.UTC8) - timedelta(days=retention_days)
-        cursor.execute("""
-            DELETE FROM taxes
-            WHERE tax_id IN (
-                SELECT tax_id
-                FROM taxes
-                WHERE timestamp < ?
-                ORDER BY timestamp ASC
-                LIMIT ?
-            )
-        """, (cutoff_time, batch_size))
-        return cursor.rowcount or 0
-
-    def get_tax_records(self, user_id: str, limit: int = 10) -> List[TaxRecord]:
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM taxes
-                WHERE user_id = ? ORDER BY timestamp DESC LIMIT ?
-            """, (user_id, limit))
-            return [self._row_to_tax_record(row) for row in cursor.fetchall()]
-
-    def get_tax_records_for_admin(
-        self,
-        user_id: str = None,
-        start_time: datetime = None,
-        end_time: datetime = None,
-        tax_type: str = None,
-        limit: int = 200,
-    ) -> List[Dict[str, Any]]:
-        conditions = []
-        params = []
-        if user_id:
-            conditions.append("t.user_id = ?")
-            params.append(user_id)
-        if start_time:
-            conditions.append("t.timestamp >= ?")
-            params.append(start_time)
-        if end_time:
-            conditions.append("t.timestamp < ?")
-            params.append(end_time)
-        if tax_type:
-            conditions.append("t.tax_type = ?")
-            params.append(tax_type)
-
-        where_sql = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-        params.append(limit)
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(f"""
-                SELECT
-                    t.*,
-                    COALESCE(u.nickname, '') AS nickname
-                FROM taxes t
-                LEFT JOIN users u ON u.user_id = t.user_id
-                {where_sql}
-                ORDER BY t.timestamp DESC, t.tax_id DESC
-                LIMIT ?
-            """, params)
-            return [dict(row) for row in cursor.fetchall()]
-
-    def get_tax_summary_for_admin(
-        self,
-        start_time: datetime = None,
-        end_time: datetime = None,
-        user_id: str = None,
-    ) -> Dict[str, Any]:
-        conditions = []
-        params = []
-        if start_time:
-            conditions.append("timestamp >= ?")
-            params.append(start_time)
-        if end_time:
-            conditions.append("timestamp < ?")
-            params.append(end_time)
-        if user_id:
-            conditions.append("user_id = ?")
-            params.append(user_id)
-        where_sql = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(f"""
-                SELECT
-                    COALESCE(SUM(tax_amount), 0) AS total_tax,
-                    COUNT(*) AS record_count,
-                    COUNT(DISTINCT user_id) AS user_count,
-                    COALESCE(SUM(CASE WHEN tax_type = '每日资产税' THEN tax_amount ELSE 0 END), 0) AS daily_tax_total,
-                    SUM(CASE WHEN tax_type = '每日资产税' THEN 1 ELSE 0 END) AS daily_tax_count
-                FROM taxes
-                {where_sql}
-            """, params)
-            row = cursor.fetchone()
-
-            cursor.execute(f"""
-                SELECT tax_type, COALESCE(SUM(tax_amount), 0) AS total_tax, COUNT(*) AS record_count
-                FROM taxes
-                {where_sql}
-                GROUP BY tax_type
-                ORDER BY total_tax DESC
-            """, params)
-            by_type = [dict(item) for item in cursor.fetchall()]
-
-            return {
-                "total_tax": row["total_tax"] or 0,
-                "record_count": row["record_count"] or 0,
-                "user_count": row["user_count"] or 0,
-                "daily_tax_total": row["daily_tax_total"] or 0,
-                "daily_tax_count": row["daily_tax_count"] or 0,
-                "by_type": by_type,
-            }
-    
-    def has_daily_tax_today(self, reset_hour: int = 0) -> bool:
-        """检查今天是否已经执行过每日资产税"""
-        from ..utils import get_last_reset_time
-        last_reset = get_last_reset_time(reset_hour)
-        
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT COUNT(*) FROM taxes
-                WHERE tax_type = '每日资产税'
-                AND timestamp >= ?
-            """, (last_reset,))
-            result = cursor.fetchone()
-            return result[0] > 0 if result else False
-    
-    def has_user_daily_tax_today(self, user_id: str, reset_hour: int = 0) -> bool:
-        """检查某个用户今天是否已经被征收过每日资产税"""
-        from ..utils import get_last_reset_time
-        last_reset = get_last_reset_time(reset_hour)
-        
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT COUNT(*) FROM taxes
-                WHERE user_id = ?
-                AND tax_type = '每日资产税'
-                AND timestamp >= ?
-            """, (user_id, last_reset))
-            result = cursor.fetchone()
-            return result[0] > 0 if result else False
 
     def get_gacha_records_count_today(
         self, user_id: str, gacha_pool_id: int

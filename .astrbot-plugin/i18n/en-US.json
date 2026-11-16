@@ -2,7 +2,7 @@
   "views": {
     "admin": {
       "title": "Fishing Admin",
-      "description": "Manage players, bank, taxes, market, exchange, shops, gacha pools, fishing zones, item templates and titles."
+      "description": "Manage players, market, exchange, shops, gacha pools, fishing zones, item templates and titles."
     }
   }
 }

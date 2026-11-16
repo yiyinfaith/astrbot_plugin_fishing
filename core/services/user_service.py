@@ -11,7 +11,7 @@ from ..repositories.abstract_repository import (
     AbstractAchievementRepository
 )
 from .gacha_service import GachaService
-from ..domain.models import User, TaxRecord
+from ..domain.models import User
 from ..utils import get_now, get_today
 
 
@@ -48,8 +48,6 @@ class UserService:
         self.gacha_service = gacha_service
         self.config = config
         self.achievement_repo = achievement_repo
-        # 由组合根注入，用于总资产榜和转账前的欠税校验。
-        self.bank_repo = None
 
     def register(self, user_id: str, nickname: str) -> Dict[str, Any]:
         """
@@ -126,28 +124,6 @@ class UserService:
             top_users = self.user_repo.get_top_users_by_weight(limit)
         elif sort_by == "max_coins":
             top_users = self.user_repo.get_top_users_by_max_coins(limit)
-        elif sort_by == "total_assets" and self.bank_repo:
-            # 金币榜只看钱包，银行上线后越有钱的人越会把钱藏进银行，榜单会失真，
-            # 这里按 钱包+活期+进行中定期本金 排。
-            rows = self.bank_repo.get_top_users_by_total_assets(limit)
-            return {
-                "success": True,
-                "leaderboard": [
-                    {
-                        "user_id": row["user_id"],
-                        "nickname": row["nickname"],
-                        "coins": row["coins"],
-                        "max_coins": row["max_coins"],
-                        "bank_balance": row["bank_balance"],
-                        "fixed_principal": row["fixed_principal"],
-                        "total_assets": row["total_assets"],
-                        "fish_count": 0,
-                        "total_weight_caught": 0,
-                        "current_title_id": None,
-                    }
-                    for row in rows
-                ],
-            }
         else: # 默认按金币排序
             top_users = self.user_repo.get_top_users_by_coins(limit)
 
@@ -421,23 +397,6 @@ class UserService:
             "message": f"金币数量已更新，当前金币：{user.coins}"
         }
 
-    def _check_tax_debt_block(self, user_id: str) -> Optional[Dict[str, Any]]:
-        """欠税未缴时阻断资产转出。返回 None 表示放行。"""
-        if not self.bank_repo:
-            return None
-        if not self.config.get("bank", {}).get("block_inflow_when_in_debt", True):
-            return None
-        debt = self.bank_repo.get_tax_debt(user_id)
-        if debt <= 0:
-            return None
-        return {
-            "success": False,
-            "message": (
-                f"❌ 你还有 {debt:,} 金币欠税未缴，无法转账。\n"
-                f"💡 请先使用：/钓鱼银行 还税"
-            ),
-        }
-
     def transfer_coins(self, from_user_id: str, to_user_id: str, amount: int) -> Dict[str, Any]:
         """
         用户之间转账金币。
@@ -456,10 +415,6 @@ class UserService:
         if from_user_id == to_user_id:
             return {"success": False, "message": "不能转账给自己"}
 
-        # 欠税未清时禁止转出，否则把钱转给小号就能永远躲开补扣
-        if debt_error := self._check_tax_debt_block(from_user_id):
-            return debt_error
-
         # 获取转账方用户
         from_user = self.user_repo.get_by_id(from_user_id)
         if not from_user:
@@ -471,10 +426,9 @@ class UserService:
             return {"success": False, "message": "接收方用户不存在"}
         
         # 计算转账手续费
-        tax_config = self.config.get("tax", {})
-        transfer_tax_rate = tax_config.get("transfer_tax_rate", 0.05)  # 默认5%
-        tax_amount = int(amount * transfer_tax_rate)
-        total_cost = amount + tax_amount  # 转账方需支付的总金额
+        fee_rate = self.config.get("user", {}).get("transfer_fee_rate", 0.05)
+        fee_amount = int(amount * fee_rate)
+        total_cost = amount + fee_amount  # 转账方需支付的总金额
         
         # 检查余额是否足够（包含手续费）
         if from_user.coins < total_cost:
@@ -482,13 +436,10 @@ class UserService:
                 "success": False,
                 "message": f"❌ 余额不足！\n"
                           f"💰 到账金额：{amount} 金币\n"
-                          f"💸 转账手续费（{int(transfer_tax_rate*100)}%）：{tax_amount} 金币\n"
+                          f"💸 转账手续费（{int(fee_rate*100)}%）：{fee_amount} 金币\n"
                           f"📊 需要总计：{total_cost} 金币\n"
                           f"💳 当前余额：{from_user.coins} 金币"
             }
-        
-        # 记录转账前的金额
-        original_coins = from_user.coins
         
         # 执行转账
         from_user.coins -= total_cost  # 扣除转账金额 + 手续费
@@ -498,26 +449,12 @@ class UserService:
         self.user_repo.update(from_user)
         self.user_repo.update(to_user)
         
-        # 记录转账税收
-        if tax_amount > 0:
-            tax_log = TaxRecord(
-                tax_id=0,  # DB会自增
-                user_id=from_user_id,
-                tax_amount=tax_amount,
-                tax_rate=transfer_tax_rate,
-                original_amount=original_coins,
-                balance_after=from_user.coins,
-                timestamp=get_now(),
-                tax_type="转账手续费"
-            )
-            self.log_repo.add_tax_record(tax_log)
-        
         # 构建返回消息
         message = f"✅ 转账成功！\n"
         message += f"👤 接收方：{to_user.nickname}\n"
         message += f"💰 到账金额：{amount} 金币\n"
-        if tax_amount > 0:
-            message += f"💸 转账手续费（{int(transfer_tax_rate*100)}%）：{tax_amount} 金币\n"
+        if fee_amount > 0:
+            message += f"💸 转账手续费（{int(fee_rate*100)}%）：{fee_amount} 金币\n"
             message += f"📊 扣除总计：{total_cost} 金币\n"
         message += f"💳 您的余额：{from_user.coins} 金币"
         
@@ -525,23 +462,6 @@ class UserService:
             "success": True,
             "message": message
         }
-
-    def get_tax_record(self, user_id: str) -> Dict[str, Any]:
-        user = self.user_repo.get_by_id(user_id)
-        if not user:
-            return {"success": False, "message": "用户不存在"}
-        tax_records = self.log_repo.get_tax_records(user_id)
-        if not tax_records:
-            return {"success": True, "records": []}
-        records_data = [
-            {
-                "amount": record.tax_amount,
-                "timestamp": record.timestamp,
-                "tax_type": record.tax_type,
-            }
-            for record in tax_records
-        ]
-        return {"success": True, "records": records_data}
 
     def get_users_for_admin(self, page: int = 1, per_page: int = 20, search: str = None) -> Dict[str, Any]:
         """

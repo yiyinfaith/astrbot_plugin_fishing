@@ -6,7 +6,7 @@ from typing import Optional, List, Dict, Any
 
 from astrbot.api import logger
 
-from ..domain.models import User, TaxRecord
+from ..domain.models import User
 from .abstract_repository import AbstractUserRepository
 
 class SqliteUserRepository(AbstractUserRepository):

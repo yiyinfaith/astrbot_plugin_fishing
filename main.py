@@ -17,7 +17,6 @@ from .core.repositories.sqlite_log_repo import SqliteLogRepository
 from .core.repositories.sqlite_achievement_repo import SqliteAchievementRepository
 from .core.repositories.sqlite_user_buff_repo import SqliteUserBuffRepository
 from .core.repositories.sqlite_exchange_repo import SqliteExchangeRepository
-from .core.repositories.sqlite_bank_repo import SqliteBankRepository
 
 from .core.services.data_setup_service import DataSetupService
 from .core.services.item_template_service import ItemTemplateService
@@ -33,24 +32,8 @@ from .core.services.effect_manager import EffectManager
 from .core.services.fishing_zone_service import FishingZoneService
 from .core.services.exchange_service import ExchangeService
 from .core.services.fish_weight_service import FishWeightService
-from .core.services.bank_service import BankService
 
 from .core.database.migration import run_migrations
-
-# 计税口径的合法取值。填错一个字符会静默改变全服的计税结果，因此在读取配置时
-# 就要校验并告警，而不是等仓储层用 == 比较时悄悄走进另一条分支。
-ASSET_SCOPES = ("wallet", "wallet_bank", "wallet_bank_fixed")
-DEDUCT_SCOPES = ("wallet", "bank", "wallet_bank")
-TAXABLE_MODES = ("total", "excess")
-
-
-def _validated_option(value, allowed, default, label: str):
-    if value is None:
-        return default
-    if value in allowed:
-        return value
-    logger.warning(f"配置项 {label} 的值 {value!r} 不在 {allowed} 内，已回落为 {default!r}")
-    return default
 
 # ==========================================================
 # 导入所有指令函数
@@ -62,7 +45,6 @@ from .handlers import (
     social_handlers,
     gacha_handlers,
     aquarium_handlers,
-    bank_handlers,
 )
 from .handlers.fishing_handlers import FishingHandlers
 from .handlers.exchange_handlers import ExchangeHandlers
@@ -77,17 +59,6 @@ class FishingPlugin(Star):
         super().__init__(context)
 
         # --- 1. 加载配置 ---
-        # 保留框架配置对象本身：Web 后台改税率时要用它的 save_config() 写回，
-        # 比自己猜配置文件路径可靠。
-        self.astrbot_config = config
-        # 从新的嵌套结构中读取配置
-        tax_config = config.get("tax", {})
-        self.is_tax = tax_config.get("is_tax", True)  # 是否开启税收
-        self.threshold = tax_config.get("threshold", 100000)  # 起征点
-        self.step_coins = tax_config.get("step_coins", 100000)
-        self.step_rate = tax_config.get("step_rate", 0.01)
-        self.max_rate = tax_config.get("max_rate", 0.2)  # 最大税率
-        self.min_rate = tax_config.get("min_rate", 0.001)  # 最小税率
         self.area2num = config.get("area2num", 2000)
         self.area3num = config.get("area3num", 500)
         
@@ -116,7 +87,6 @@ class FishingPlugin(Star):
         user_config = config.get("user", {})
         market_config = config.get("market", {})
         sell_prices_config = config.get("sell_prices", {})
-        bank_config = config.get("bank", {})
         
         # 直接从框架获取 exchange 配置（不重建）
         exchange_config = config.get("exchange", {})
@@ -156,31 +126,11 @@ class FishingPlugin(Star):
             },
             "daily_reset_hour": game_global_config.get("daily_reset_hour", 0),
             "user": {
-                "initial_coins": user_config.get("initial_coins", 200)
+                "initial_coins": user_config.get("initial_coins", 200),
+                "transfer_fee_rate": user_config.get("transfer_fee_rate", 0.05),
             },
             "market": {
                 "listing_tax_rate": market_config.get("listing_tax_rate", 0.05)
-            },
-            "tax": {
-                "is_tax": self.is_tax,
-                "threshold": self.threshold,
-                "asset_scope": _validated_option(
-                    tax_config.get("asset_scope"), ASSET_SCOPES, "wallet", "tax.asset_scope"
-                ),
-                "deduct_scope": _validated_option(
-                    tax_config.get("deduct_scope"), DEDUCT_SCOPES, "wallet", "tax.deduct_scope"
-                ),
-                "taxable_mode": _validated_option(
-                    tax_config.get("taxable_mode"), TAXABLE_MODES, "total", "tax.taxable_mode"
-                ),
-                "debt_surcharge_rate": tax_config.get("debt_surcharge_rate", 0.02),
-                "step_coins": self.step_coins,
-                "step_rate": self.step_rate,
-                "min_rate": self.min_rate,
-                "max_rate": self.max_rate,
-                "transfer_tax_rate": tax_config.get("transfer_tax_rate", 0.05),
-                "tax_record_retention_days": tax_config.get("tax_record_retention_days", 90),
-                "tax_record_cleanup_batch_size": tax_config.get("tax_record_cleanup_batch_size", 1000),
             },
             "pond_upgrades": [
                 { "from": 480, "to": 999, "cost": 50000 },
@@ -219,17 +169,6 @@ class FishingPlugin(Star):
                 }
             },
             "exchange": exchange_config,  # 直接使用框架的配置
-            "bank": {
-                "enabled": bank_config.get("enabled", True),
-                "daily_free_withdraw_limit": bank_config.get("daily_free_withdraw_limit", 1000000),
-                "withdraw_fee_rate": bank_config.get("withdraw_fee_rate", 0.03),
-                "reservation_threshold": bank_config.get("reservation_threshold", 5000000),
-                "reservation_delay_hours": bank_config.get("reservation_delay_hours", 24),
-                "reservation_expire_hours": bank_config.get("reservation_expire_hours", 72),
-                "max_pending_reservations": bank_config.get("max_pending_reservations", 1),
-                "block_inflow_when_in_debt": bank_config.get("block_inflow_when_in_debt", True),
-                "fixed_deposit": bank_config.get("fixed_deposit", {}),
-            },
         }
         
         # 初始化数据库模式
@@ -244,15 +183,10 @@ class FishingPlugin(Star):
         self.gacha_repo = SqliteGachaRepository(db_path)
         self.market_repo = SqliteMarketRepository(db_path)
         self.shop_repo = SqliteShopRepository(db_path)
-        self.log_repo = SqliteLogRepository(
-            db_path,
-            tax_record_retention_days=self.game_config["tax"].get("tax_record_retention_days", 90),
-            tax_record_cleanup_batch_size=self.game_config["tax"].get("tax_record_cleanup_batch_size", 1000),
-        )
+        self.log_repo = SqliteLogRepository(db_path)
         self.achievement_repo = SqliteAchievementRepository(db_path)
         self.buff_repo = SqliteUserBuffRepository(db_path)
         self.exchange_repo = SqliteExchangeRepository(db_path)
-        self.bank_repo = SqliteBankRepository(db_path)
 
         # --- 3. 组合根：实例化所有服务层，并注入依赖 ---
         # 3.1 核心服务必须在效果管理器之前实例化，以解决依赖问题
@@ -289,7 +223,6 @@ class FishingPlugin(Star):
             self.fishing_zone_service,
             self.fish_weight_service,
             self.game_config,
-            self.bank_repo,
         )
         
         # 导入并初始化水族箱服务
@@ -302,12 +235,6 @@ class FishingPlugin(Star):
         
         # 初始化交易所服务
         self.exchange_service = ExchangeService(self.user_repo, self.exchange_repo, self.game_config, self.log_repo, self.market_service)
-        
-        self.bank_service = BankService(self.bank_repo, self.user_repo, self.log_repo, self.game_config)
-        # 银行依赖是后注入的：总资产榜、转账欠税校验和每日定期结算都要用到，
-        # 但这些服务的构造早于 BankService。
-        self.user_service.bank_repo = self.bank_repo
-        self.fishing_service.bank_service = self.bank_service
         
         # 初始化交易所处理器
         self.exchange_handlers = ExchangeHandlers(self)
@@ -337,8 +264,6 @@ class FishingPlugin(Star):
 
         # --- 4. 启动后台任务 ---
         self.fishing_service.start_auto_fishing_task()
-        if self.is_tax:
-            self.fishing_service.start_daily_tax_task()  # 启动独立的税收线程
         self.achievement_service.start_achievement_check_task()
         self.exchange_service.start_daily_price_update_task() # 启动交易所后台任务
 
@@ -550,31 +475,6 @@ class FishingPlugin(Star):
         async for r in inventory_handlers.coins(self, event):
             yield r
 
-    @filter.command("钓鱼银行")
-    async def bank(self, event: AstrMessageEvent):
-        """查看银行账户或进行银行操作。用法：钓鱼银行 [存款/取款/预约取款/确认预约/取消预约/定期] [金额]"""
-        async for r in bank_handlers.bank_main(self, event):
-            yield r
-
-    @filter.command("钓鱼存款")
-    async def bank_deposit(self, event: AstrMessageEvent):
-        """快捷存款。用法：钓鱼存款 金额"""
-        async for r in bank_handlers.deposit(self, event):
-            yield r
-
-    @filter.command("钓鱼取款")
-    async def bank_withdraw(self, event: AstrMessageEvent):
-        """快捷取款。用法：钓鱼取款 金额"""
-        async for r in bank_handlers.withdraw(self, event):
-            yield r
-
-    @filter.command("钓鱼还税", alias={"还税"})
-    async def bank_repay_tax(self, event: AstrMessageEvent):
-        """从钱包缴清欠税。用法：钓鱼还税 [金额]"""
-        args = event.message_str.strip().split()
-        async for r in bank_handlers.repay_tax(self, event, amount_arg=args[1] if len(args) >= 2 else None):
-            yield r
-
     @filter.command("转账", alias={"赠送"})
     async def transfer_coins(self, event: AstrMessageEvent):
         """转账金币给其他玩家。用法：转账 @用户 金额"""
@@ -757,12 +657,6 @@ class FishingPlugin(Star):
         async for r in social_handlers.view_achievements(self, event):
             yield r
 
-    @filter.command("税收记录")
-    async def tax_record(self, event: AstrMessageEvent):
-        """查看你的税收缴纳记录"""
-        async for r in social_handlers.tax_record(self, event):
-            yield r
-            
     # =========== 交易所 ==========
 
     @filter.command("交易所")
@@ -793,10 +687,9 @@ class FishingPlugin(Star):
         """插件被卸载/停用时调用"""
         logger.info("钓鱼插件正在终止...")
         self.fishing_service.stop_auto_fishing_task()
-        self.fishing_service.stop_daily_tax_task()  # 终止独立的税收线程
         self.achievement_service.stop_achievement_check_task()
         self.exchange_service.stop_daily_price_update_task() # 终止交易所后台任务
         
-        for repo in (self.user_repo, self.inventory_repo, self.bank_repo):
+        for repo in (self.user_repo, self.inventory_repo):
             repo.close_connection()
         logger.info("钓鱼插件已成功终止。")

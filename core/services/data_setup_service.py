@@ -46,10 +46,6 @@ class DataSetupService:
         检查核心数据表是否为空，如果为空则进行数据填充。
         这是一个幂等操作（idempotent），可以安全地多次调用而不会重复插入数据。
         """
-        # 确保系统虚拟用户存在
-        if self.user_repo:
-            self.ensure_system_user()
-
         try:
             existing_fish = self.item_template_repo.get_all_fish()
             if existing_fish:
@@ -352,27 +348,3 @@ class DataSetupService:
             logger.info("新道具添加完成。")
         else:
             logger.info("没有发现新的道具需要添加。")
-
-    def ensure_system_user(self):
-        """确保系统虚拟用户(SYSTEM)存在于用户表中，以满足外键约束"""
-        from ..domain.models import User
-        from datetime import datetime
-        
-        if not self.user_repo:
-            return
-
-        try:
-            if not self.user_repo.check_exists("SYSTEM"):
-                logger.info("正在创建系统虚拟用户(SYSTEM)...")
-                system_user = User(
-                    user_id="SYSTEM",
-                    nickname="系统银行",
-                    coins=0,
-                    created_at=datetime.now(),
-                    max_coins=0
-                )
-                self.user_repo.add(system_user)
-                logger.info("系统虚拟用户创建成功。")
-        except Exception as e:
-            logger.error(f"创建系统虚拟用户失败: {e}")
-

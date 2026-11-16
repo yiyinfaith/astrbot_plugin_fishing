@@ -8,7 +8,7 @@ from datetime import date, datetime
 from ..domain.models import (
     User, Fish, Rod, Bait, Accessory, Title, Achievement, Item,
     UserRodInstance, UserAccessoryInstance, UserFishInventoryItem, UserAquariumItem,
-    FishingRecord, GachaRecord, MarketListing, TaxRecord,
+    FishingRecord, GachaRecord, MarketListing,
     GachaPool, GachaPoolItem, FishingZone, UserBuff, AquariumUpgrade,
     ShopOffer, ShopOfferCost, ShopOfferReward,
     Commodity, Exchange, UserCommodity  # 新增交易所模型导入
@@ -523,15 +523,6 @@ class AbstractLogRepository(ABC):
     # 检查用户某天是否已签到
     @abstractmethod
     def has_checked_in(self, user_id: str, check_in_date: date) -> bool: pass
-    # 记录一条税收日志
-    @abstractmethod
-    def add_tax_record(self, record: TaxRecord) -> None: pass
-    # 获取用户的税收历史
-    @abstractmethod
-    def get_tax_records(self, user_id: str, limit: int = 10) -> List[TaxRecord]: pass
-    # 检查某个用户今天是否已经被征收过每日资产税
-    @abstractmethod
-    def has_user_daily_tax_today(self, user_id: str, reset_hour: int = 0) -> bool: pass
 
     @abstractmethod
     def get_gacha_records_count_today(

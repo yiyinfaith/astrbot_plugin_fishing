@@ -1,4 +1,4 @@
-"""1.0.0 改造的回归测试：管理员指令下线、玩法删除、面板接口与新库初始化。"""
+"""1.0.0 改造的回归测试：管理员指令下线、玩法与银行税收删除、面板接口与新库初始化。"""
 
 import asyncio
 import json
@@ -23,6 +23,7 @@ REMOVED_COMMANDS = [
     "擦弹", "擦弹记录", "命运之轮", "继续", "放弃", "开庄", "玩家开庄", "鸭大", "鸭小", "鸭豹子", "鸭17点",
     "骰宝状态", "骰宝帮助", "21点", "21点加入", "抽牌", "停牌", "拉杆", "连转", "奖池", "读博记录",
     "发红包", "领红包", "红包列表", "撤回红包", "系统借款", "确认借款", "借条", "一键还债", "还系统",
+    "钓鱼银行", "钓鱼存款", "钓鱼取款", "钓鱼还税", "还税", "税收记录",
 ]
 
 
@@ -44,7 +45,7 @@ class CommandSurfaceTests(unittest.TestCase):
             self.assertNotIn(command, names | aliases, command)
         self.assertNotIn("filter.regex", MAIN_SOURCE)
         # 保留的核心玩法仍在
-        for command in ("钓鱼", "鱼塘", "商店", "市场", "抽卡", "钓鱼银行", "交易所", "偷鱼", "排行榜"):
+        for command in ("钓鱼", "鱼塘", "商店", "市场", "抽卡", "交易所", "偷鱼", "排行榜", "转账"):
             self.assertIn(command, names)
 
     def test_removed_modules_are_gone(self):
@@ -53,13 +54,16 @@ class CommandSurfaceTests(unittest.TestCase):
             "handlers/slot_handlers.py", "handlers/loan_handlers.py", "handlers/red_packet_handlers.py",
             "core/services/sicbo_service.py", "core/services/blackjack_service.py", "core/services/slot_service.py",
             "core/services/loan_service.py", "core/services/red_packet_service.py", "manager/server.py",
+            "handlers/bank_handlers.py", "core/services/bank_service.py", "core/repositories/sqlite_bank_repo.py",
+            "core/repositories/bank_sql.py", "core/domain/bank_models.py",
         ):
             self.assertFalse((PLUGIN_DIR / path).exists(), path)
 
     def test_schema_has_no_removed_config(self):
         schema = json.loads((PLUGIN_DIR / "_conf_schema.json").read_text(encoding="utf-8-sig"))
-        for key in ("webui", "sicbo", "blackjack", "slot", "loan"):
+        for key in ("webui", "sicbo", "blackjack", "slot", "loan", "tax", "bank"):
             self.assertNotIn(key, schema)
+        self.assertEqual(schema["user"]["items"]["transfer_fee_rate"]["default"], 0.05)
         self.assertNotIn("wipe_bomb_attempts", schema["game"]["items"])
         self.assertNotIn("wheel_of_fate_daily_limit", schema["game"]["items"])
 
@@ -86,7 +90,7 @@ class AdminApiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
-        cls.plugin, cls.context = astrbot_stub.load_plugin(Path(cls.tmp.name), {"tax": {"is_tax": False}})
+        cls.plugin, cls.context = astrbot_stub.load_plugin(Path(cls.tmp.name), {})
         cls.api = cls.plugin.admin_api
         import importlib
         cls.ApiError = importlib.import_module(f"{PLUGIN_DIR.name}.webui.admin_api").ApiError
@@ -181,15 +185,17 @@ class AdminApiTests(unittest.TestCase):
             self.call(self.api.shop_item_save, body={"shop_id": shop["shop_id"], "name": "空", "rewards": []})
         self.call(self.api.shop_delete, body={"shop_id": shop["shop_id"]})
 
-    def test_tax_save_updates_runtime_and_config(self):
-        self.call(self.api.tax_save, body={
-            "is_tax": False, "threshold": 123456, "asset_scope": "wallet", "deduct_scope": "wallet",
-            "taxable_mode": "excess", "min_rate": 0.01, "max_rate": 0.1,
-        })
-        self.assertEqual(self.plugin.game_config["tax"]["threshold"], 123456)
-        self.assertEqual(self.plugin.astrbot_config["tax"]["taxable_mode"], "excess")
-        with self.assertRaises(self.ApiError):
-            self.call(self.api.tax_save, body={"asset_scope": "everything", "deduct_scope": "wallet", "taxable_mode": "total"})
+    def test_transfer_charges_fee_without_bank_or_tax(self):
+        self.assertFalse(hasattr(self.plugin, "bank_service"))
+        self.assertNotIn("tax", self.plugin.game_config)
+        self.call(self.api.user_currency, body={"user_id": "1001", "currency": "coins", "mode": "set", "amount": 1000})
+        before = self.plugin.user_repo.get_by_id("1002").coins
+        result = self.plugin.user_service.transfer_coins("1001", "1002", 100)
+        self.assertTrue(result["success"], result)
+        self.assertEqual(self.plugin.user_repo.get_by_id("1001").coins, 895)
+        self.assertEqual(self.plugin.user_repo.get_by_id("1002").coins, before + 100)
+        routes = {r[0] for r in self.api.routes()}
+        self.assertFalse({"bank", "tax", "tax/save"} & routes)
 
     def test_impersonation_maps_sender_to_player(self):
         self.call(self.api.impersonation_start, body={"admin_id": "9", "target_id": "1002"})
@@ -204,7 +210,7 @@ class AdminApiTests(unittest.TestCase):
 
     def test_every_read_endpoint_serializes(self):
         for name, query in (
-            ("overview", {}), ("users", {}), ("bank", {}), ("tax", {}), ("market", {}), ("exchange", {}),
+            ("overview", {}), ("users", {}), ("market", {}), ("exchange", {}),
             ("shops", {}), ("gacha", {}), ("zones", {}), ("titles", {}), ("meta", {}),
             ("templates", {"kind": "rods"}), ("users/inventory", {"user_id": "1001"}), ("users/detail", {"user_id": "1001"}),
         ):
@@ -236,6 +242,36 @@ class MigrationTests(unittest.TestCase):
         module.up(cur)
         self.assertEqual([r[0] for r in cur.execute("SELECT title_id FROM titles ORDER BY title_id")], [1, 20])
         self.assertEqual([r[0] for r in cur.execute("SELECT item_id FROM items ORDER BY item_id")], [2, 3])
+
+    def test_050_refunds_bank_money_to_wallet(self):
+        import importlib.util
+        path = PLUGIN_DIR / "core" / "database" / "migrations" / "050_refund_bank_balances.py"
+        spec = importlib.util.spec_from_file_location("m050", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        conn = sqlite3.connect(":memory:")
+        cur = conn.cursor()
+        cur.executescript("""
+            CREATE TABLE users (user_id TEXT PRIMARY KEY, coins INTEGER, max_coins INTEGER);
+            CREATE TABLE bank_accounts (user_id TEXT PRIMARY KEY, balance INTEGER, locked_balance INTEGER);
+            CREATE TABLE bank_fixed_deposits (deposit_id INTEGER PRIMARY KEY, user_id TEXT, principal INTEGER,
+                expected_interest INTEGER, status TEXT, matures_at DATETIME, completed_at DATETIME);
+            CREATE TABLE bank_withdraw_reservations (reservation_id INTEGER PRIMARY KEY, user_id TEXT, status TEXT);
+            INSERT INTO users VALUES ('a', 100, 100), ('b', 5, 50);
+            INSERT INTO bank_accounts VALUES ('a', 1000, 300), ('b', 0, 0);
+            INSERT INTO bank_fixed_deposits VALUES
+                (1, 'a', 500, 50, 'active', '2000-01-01 00:00:00', NULL),
+                (2, 'b', 200, 20, 'active', '2999-01-01 00:00:00', NULL),
+                (3, 'b', 999, 99, 'completed', '2000-01-01 00:00:00', NULL);
+            INSERT INTO bank_withdraw_reservations VALUES (1, 'a', 'pending');
+        """)
+        module.up(cur)
+        coins = dict(cur.execute("SELECT user_id, coins FROM users"))
+        self.assertEqual(coins, {"a": 100 + 1000 + 550, "b": 5 + 200})
+        self.assertEqual(cur.execute("SELECT max_coins FROM users WHERE user_id = 'a'").fetchone()[0], 1650)
+        self.assertEqual(cur.execute("SELECT SUM(balance) + SUM(locked_balance) FROM bank_accounts").fetchone()[0], 0)
+        self.assertEqual(cur.execute("SELECT COUNT(*) FROM bank_fixed_deposits WHERE status = 'active'").fetchone()[0], 0)
+        self.assertEqual(cur.execute("SELECT status FROM bank_withdraw_reservations").fetchone()[0], "cancelled")
 
 
 if __name__ == "__main__":

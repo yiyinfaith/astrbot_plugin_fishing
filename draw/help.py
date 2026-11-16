@@ -128,20 +128,6 @@ def draw_help_image():
         ("高级货币", "查看高级\n货币余额"),
     ]
 
-    bank = [
-        ("钓鱼银行", "查看银行账户\n和免费提现额度"),
-        ("钓鱼存款 [金额]", "快捷存入\n钱包金币"),
-        ("钓鱼取款 [金额]", "快捷取出\n银行活期"),
-        ("钓鱼银行 预约取款 [金额]", "预约大额\n取款"),
-        ("钓鱼银行 定期", "查看定期\n档位规则"),
-        ("钓鱼银行 定期存款 [金额] [天数]", "创建定期\n存单"),
-        ("钓鱼银行 定期列表", "查看我的\n定期存单"),
-        ("钓鱼银行 定期取出 [编号]", "领取已到期\n定期"),
-        ("钓鱼银行 提前取出 [编号]", "提前取出\n仅返本金"),
-        ("钓鱼还税 [金额]", "从钱包缴清\n欠税"),
-        ("钓鱼银行 流水", "查看最近\n资金明细"),
-    ]
-
     market = [
         ("全部卖出", "一键卖出\n鱼塘所有鱼"),
         ("保留卖出", "卖出所有鱼\n但每种保留一条"),
@@ -175,7 +161,6 @@ def draw_help_image():
         ("查看称号", "查看我拥有的称号"),
         ("使用称号 [ID]", "装备指定ID称号"),
         ("查看成就", "查看我的成就进度"),
-        ("税收记录", "查看我的税收记录"),
         ("鱼类图鉴", "查看已解锁的\n鱼类图鉴"),
     ]
 
@@ -201,7 +186,6 @@ def draw_help_image():
     y0_est = logo_y + logo_size + 30
     y0_est += section_delta(len(basic), 3)
     y0_est += section_delta(len(inventory), 3)
-    y0_est += section_delta(len(bank), 3)
     y0_est += section_delta(len(market), 3)
     y0_est += section_delta(len(gacha), 3)
     y0_est += section_delta(len(social), 2)
@@ -215,11 +199,13 @@ def draw_help_image():
 
     # 绘制 Logo 和 标题
     try:
-        # 使用插件自己的 Logo（带透明圆角），直接按 alpha 贴到背景上
+        # 使用插件自己的 Logo，裁成圆角后贴到背景上
         logo_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logo.png")
         logo = Image.open(logo_path).convert("RGBA")
         logo = logo.resize((logo_size, logo_size), Image.Resampling.LANCZOS)
-        image.paste(logo, (logo_x, logo_y), logo)
+        mask = Image.new("L", (logo_size, logo_size), 0)
+        ImageDraw.Draw(mask).rounded_rectangle((0, 0, logo_size - 1, logo_size - 1), logo_size // 5, fill=255)
+        image.paste(logo, (logo_x, logo_y), mask)
     except Exception as e:
         # 如果没有logo文件，绘制一个圆角占位符
         draw.rounded_rectangle((logo_x, logo_y, logo_x + logo_size, logo_y + logo_size),
@@ -238,7 +224,6 @@ def draw_help_image():
     y0 = logo_y + logo_size + 30
     y0 = draw_section("🎣 基础与核心玩法", basic, y0, cols=3)
     y0 = draw_section("🎒 背包与资产管理", inventory, y0, cols=3)
-    y0 = draw_section("🏦 银行系统", bank, y0, cols=3)
     y0 = draw_section("🛒 商店与市场", market, y0, cols=3)
     y0 = draw_section("🎰 抽卡", gacha, y0, cols=3)
     y0 = draw_section("👥 社交功能", social, y0, cols=2)

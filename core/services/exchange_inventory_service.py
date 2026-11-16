@@ -345,24 +345,6 @@ class ExchangeInventoryService:
             user.coins += net_income
             self.user_repo.update(user)
             
-            # 记录税费
-            if self.log_repo:
-                from ..domain.models import TaxRecord
-                tax_record = TaxRecord(
-                    tax_id=0,  # 数据库自增
-                    user_id=user_id,
-                    tax_amount=tax_amount,
-                    tax_rate=tax_rate,
-                    original_amount=taxable_profit,
-                    balance_after=user.coins,
-                    tax_type=(f"卖出 {self.commodities[commodity_id]['name']} x{quantity} | "
-                              f"毛收入 {total_income:,} 金币 | 税基 {taxable_profit:,} 金币"),
-                    timestamp=datetime.now()
-                )
-                if tax_amount == 0:
-                    tax_record.tax_type += " | 未盈利免税"
-                self.log_repo.add_tax_record(tax_record)
-            
             # 构造返回消息
             tax_message = "💸 本次无税费（未盈利）"
             if tax_amount > 0:
@@ -510,24 +492,6 @@ class ExchangeInventoryService:
             user.coins += net_income
             self.user_repo.update(user)
             
-            # 记录税费
-            if self.log_repo:
-                from ..domain.models import TaxRecord
-                tax_record = TaxRecord(
-                    tax_id=0,  # 数据库自增
-                    user_id=user_id,
-                    tax_amount=tax_amount,
-                    tax_rate=tax_rate,
-                    original_amount=taxable_profit,
-                    balance_after=user.coins,
-                    tax_type=(f"清仓所有大宗商品 | 当前价值 {total_current_value:,} 金币 | "
-                              f"税基 {taxable_profit:,} 金币"),
-                    timestamp=datetime.now()
-                )
-                if tax_amount == 0:
-                    tax_record.tax_type += " | 未盈利免税"
-                self.log_repo.add_tax_record(tax_record)
-            
             # 构建详细消息
             profit_status = "📈盈利" if total_profit_loss > 0 else "📉亏损" if total_profit_loss < 0 else "➖持平"
             message = f"【📦 清仓完成】\n"
@@ -663,24 +627,6 @@ class ExchangeInventoryService:
             # 添加金币
             user.coins += net_income
             self.user_repo.update(user)
-            
-            # 记录税费
-            if self.log_repo:
-                from ..domain.models import TaxRecord
-                tax_record = TaxRecord(
-                    tax_id=0,  # 数据库自增
-                    user_id=user_id,
-                    tax_amount=tax_amount,
-                    tax_rate=tax_rate,
-                    original_amount=taxable_profit,
-                    balance_after=user.coins,
-                    tax_type=(f"清仓 {self.commodities[commodity_id]['name']} | "
-                              f"当前价值 {total_current_value:,} 金币 | 税基 {taxable_profit:,} 金币"),
-                    timestamp=datetime.now()
-                )
-                if tax_amount == 0:
-                    tax_record.tax_type += " | 未盈利免税"
-                self.log_repo.add_tax_record(tax_record)
             
             # 构建详细消息
             commodity_name = self.commodities[commodity_id]['name']

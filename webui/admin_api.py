@@ -10,14 +10,13 @@
 
 from __future__ import annotations
 
-import asyncio
 import csv
 import dataclasses
 import inspect
 import io
 import os
 import sqlite3
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -25,37 +24,6 @@ from astrbot.api import logger
 
 # 市场托管与系统账号不参与全体发放/扣除
 SYSTEM_USER_IDS = {"MARKET", "SYSTEM"}
-
-DEFAULT_TAX_CONFIG = {
-    "is_tax": True,
-    "threshold": 1_000_000,
-    "asset_scope": "wallet",
-    "deduct_scope": "wallet",
-    "taxable_mode": "total",
-    "debt_surcharge_rate": 0.02,
-    "step_coins": 100_000,
-    "step_rate": 0.01,
-    "min_rate": 0.001,
-    "max_rate": 0.2,
-    "transfer_tax_rate": 0.05,
-    "tax_record_retention_days": 90,
-    "tax_record_cleanup_batch_size": 1000,
-}
-
-ASSET_SCOPE_LABELS = {
-    "wallet": "只统计钱包",
-    "wallet_bank": "钱包 + 银行活期",
-    "wallet_bank_fixed": "钱包 + 银行活期 + 定期本金",
-}
-DEDUCT_SCOPE_LABELS = {
-    "wallet": "只从钱包扣",
-    "bank": "只从银行活期可用余额扣",
-    "wallet_bank": "钱包优先，不足再扣银行活期",
-}
-TAXABLE_MODE_LABELS = {
-    "total": "达到起征点后按全部统计资产征税",
-    "excess": "只对超过起征点的部分征税",
-}
 
 ITEM_TYPE_LABELS = {
     "fish": "鱼类",
@@ -432,13 +400,6 @@ class FishingAdminAPI:
             ("exchange", "GET", self.exchange_status, "交易所"),
             ("exchange/update", "POST", self.exchange_update, "刷新交易所价格"),
             ("exchange/reset", "POST", self.exchange_reset, "重置交易所价格"),
-            # 银行与税收
-            ("bank", "GET", self.bank_overview, "银行"),
-            ("bank/adjust", "POST", self.bank_adjust, "调整银行余额"),
-            ("bank/cancel-reservation", "POST", self.bank_cancel_reservation, "取消取款预约"),
-            ("tax", "GET", self.tax_overview, "税收"),
-            ("tax/save", "POST", self.tax_save, "保存税收设置"),
-            ("tax/waive", "POST", self.tax_waive, "减免欠税"),
         ]
 
     def register(self, context: Any, plugin_name: str) -> None:
@@ -536,8 +497,6 @@ class FishingAdminAPI:
 
     def overview(self, query, body):
         p = self.p
-        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        tax_today = p.log_repo.get_tax_summary_for_admin(start_time=today, end_time=today + timedelta(days=1))
         market = p.market_service.get_all_market_listings_for_admin(page=1, per_page=1)
         user_ids = self._real_user_ids()
         coins_total = 0
@@ -556,8 +515,6 @@ class FishingAdminAPI:
             "auto_fishing_users": auto_count,
             "coins_total": coins_total,
             "premium_total": premium_total,
-            "bank": p.bank_service.get_admin_totals(),
-            "tax_today": tax_today,
             "market": (market.get("stats") if market.get("success") else {}) or {},
             "counts": {
                 "fish": len(p.item_template_service.get_all_fish()),
@@ -571,7 +528,6 @@ class FishingAdminAPI:
                 "shops": len(p.shop_repo.get_all_shops()),
                 "gacha_pools": len(p.item_template_service.get_all_gacha_pools()),
             },
-            "tax_enabled": bool(self._tax_config().get("is_tax")),
             "impersonations": len(p.impersonation_map),
         }
 
@@ -583,11 +539,6 @@ class FishingAdminAPI:
                 for kind, spec in TEMPLATE_KINDS.items()
             },
             "item_type_labels": ITEM_TYPE_LABELS,
-            "tax_labels": {
-                "asset_scope": ASSET_SCOPE_LABELS,
-                "deduct_scope": DEDUCT_SCOPE_LABELS,
-                "taxable_mode": TAXABLE_MODE_LABELS,
-            },
         }
 
     def catalog(self, query, body):
@@ -620,7 +571,6 @@ class FishingAdminAPI:
         users = result["users"]
         return {
             "users": users,
-            "bank": self.p.bank_service.get_admin_summary_for_users(users),
             "pagination": result["pagination"],
         }
 
@@ -629,7 +579,6 @@ class FishingAdminAPI:
         result = _check(self.p.user_service.get_user_details_for_admin(user.user_id))
         return {
             "user": result["user"],
-            "bank": self.p.bank_service.get_admin_summary_for_users([result["user"]]).get(user.user_id, {}),
             "equipped_rod": result["equipped_rod"],
             "equipped_accessory": result["equipped_accessory"],
             "current_title": result["current_title"],
@@ -1353,160 +1302,3 @@ class FishingAdminAPI:
     def exchange_reset(self, query, body):
         _check(self.p.exchange_service.reset_prices_to_initial(), "价格重置失败")
         return {"message": "交易所价格已重置为初始值"}
-
-    # ------------------------------------------------------------------
-    # 银行
-    # ------------------------------------------------------------------
-
-    def bank_overview(self, query, body):
-        bank = self.p.bank_service
-        page = _int(query.get("page"), "页码", default=1, minimum=1)
-        search = _text(query.get("search"), "搜索", max_len=64)
-        result = _check(self.p.user_service.get_users_for_admin(page=page, per_page=20, search=search))
-        users = result["users"]
-        return {
-            "users": users,
-            "summaries": bank.get_admin_summary_for_users(users),
-            "pagination": result["pagination"],
-            "totals": bank.get_admin_totals(),
-            "fixed_deposits": bank.get_fixed_deposits_for_admin(search=search, limit=100),
-            "fixed_terms": bank.get_fixed_terms(),
-            "transactions": bank.get_transactions(user_id=search, limit=100),
-            "enabled": bool(self.p.game_config.get("bank", {}).get("enabled", True)),
-        }
-
-    def bank_adjust(self, query, body):
-        user = self._user_or_error(body.get("user_id"))
-        delta = _int(body.get("delta"), "调整金额")
-        if delta == 0:
-            raise ApiError("调整金额不能为 0")
-        remark = _text(body.get("remark"), "备注", max_len=200) or ""
-        return _check(self.p.bank_service.admin_adjust_balance(user.user_id, delta, remark))
-
-    def bank_cancel_reservation(self, query, body):
-        user = self._user_or_error(body.get("user_id"))
-        reservation_id = _int(body.get("reservation_id"), "预约编号", minimum=1)
-        return _check(self.p.bank_service.admin_cancel_reservation(user.user_id, reservation_id))
-
-    # ------------------------------------------------------------------
-    # 税收
-    # ------------------------------------------------------------------
-
-    def _tax_config(self) -> dict:
-        config = dict(DEFAULT_TAX_CONFIG)
-        config.update(self.p.game_config.get("tax", {}) or {})
-        return config
-
-    @staticmethod
-    def _tax_preview(config: dict, levels: int = 8) -> List[dict]:
-        threshold = int(config.get("threshold", DEFAULT_TAX_CONFIG["threshold"]))
-        step = max(int(config.get("step_coins", DEFAULT_TAX_CONFIG["step_coins"])), 1)
-        step_rate = float(config.get("step_rate", DEFAULT_TAX_CONFIG["step_rate"]))
-        min_rate = float(config.get("min_rate", DEFAULT_TAX_CONFIG["min_rate"]))
-        max_rate = float(config.get("max_rate", DEFAULT_TAX_CONFIG["max_rate"]))
-        rows = []
-        for index in range(levels):
-            lower = threshold + index * step
-            rate = min(min_rate + index * step_rate, max_rate)
-            rows.append({"lower": lower, "upper": lower + step - 1, "rate": rate})
-            if rate >= max_rate:
-                break
-        return rows
-
-    def tax_overview(self, query, body):
-        config = self._tax_config()
-        user_id = _text(query.get("user_id"), "用户 ID", max_len=128)
-        tax_type = _text(query.get("tax_type"), "税种", max_len=32)
-        limit = _int(query.get("limit"), "条数", default=200, minimum=20, maximum=1000)
-        today = date.today().isoformat()
-        start_date = _text(query.get("start_date")) or today
-        end_date = _text(query.get("end_date")) or start_date
-        try:
-            start_time = datetime.fromisoformat(start_date)
-            end_time = datetime.fromisoformat(end_date) + timedelta(days=1)
-        except ValueError:
-            raise ApiError("日期格式无效")
-        if end_time <= start_time:
-            raise ApiError("结束日期不能早于开始日期")
-        log_repo = self.p.log_repo
-        summary = log_repo.get_tax_summary_for_admin(start_time=start_time, end_time=end_time, user_id=user_id)
-        return {
-            "config": config,
-            "preview": self._tax_preview(config),
-            "summary": summary,
-            "records": log_repo.get_tax_records_for_admin(
-                user_id=user_id, start_time=start_time, end_time=end_time, tax_type=tax_type, limit=limit,
-            ),
-            "debt_summary": self.p.bank_service.get_tax_debt_summary(user_id=user_id),
-            "debts": self.p.bank_service.get_tax_debts_for_admin(user_id=user_id, limit=50),
-            "filters": {
-                "user_id": user_id or "", "tax_type": tax_type or "", "start_date": start_date,
-                "end_date": end_date, "limit": limit,
-            },
-        }
-
-    async def tax_save(self, query, body):
-        asset_scope = body.get("asset_scope")
-        deduct_scope = body.get("deduct_scope")
-        taxable_mode = body.get("taxable_mode")
-        if asset_scope not in ASSET_SCOPE_LABELS:
-            raise ApiError("资产统计范围无效")
-        if deduct_scope not in DEDUCT_SCOPE_LABELS:
-            raise ApiError("扣款来源无效")
-        if taxable_mode not in TAXABLE_MODE_LABELS:
-            raise ApiError("计税模式无效")
-        d = DEFAULT_TAX_CONFIG
-        tax = {
-            "is_tax": _bool(body.get("is_tax")),
-            "threshold": _int(body.get("threshold"), "起征点", default=d["threshold"], minimum=0),
-            "asset_scope": asset_scope,
-            "deduct_scope": deduct_scope,
-            "taxable_mode": taxable_mode,
-            "step_coins": _int(body.get("step_coins"), "金额档位步长", default=d["step_coins"], minimum=1),
-            "step_rate": _float(body.get("step_rate"), "每档增加税率", default=d["step_rate"], minimum=0, maximum=1),
-            "min_rate": _float(body.get("min_rate"), "起点税率", default=d["min_rate"], minimum=0, maximum=1),
-            "max_rate": _float(body.get("max_rate"), "最高税率", default=d["max_rate"], minimum=0, maximum=1),
-            "transfer_tax_rate": _float(body.get("transfer_tax_rate"), "转账手续费率", default=d["transfer_tax_rate"], minimum=0, maximum=1),
-            "debt_surcharge_rate": _float(body.get("debt_surcharge_rate"), "欠税滞纳金率", default=d["debt_surcharge_rate"], minimum=0, maximum=1),
-            "tax_record_retention_days": _int(body.get("tax_record_retention_days"), "税收记录保留天数", default=d["tax_record_retention_days"], minimum=1),
-            "tax_record_cleanup_batch_size": _int(body.get("tax_record_cleanup_batch_size"), "单次清理条数", default=d["tax_record_cleanup_batch_size"], minimum=1),
-        }
-        if tax["min_rate"] > tax["max_rate"]:
-            raise ApiError("起点税率不能大于最高税率")
-
-        plugin = self.p
-        plugin.game_config["tax"] = tax
-        plugin.is_tax = tax["is_tax"]
-        saved = self._persist_tax_config(tax)
-        if hasattr(plugin.log_repo, "set_tax_record_retention"):
-            plugin.log_repo.set_tax_record_retention(
-                tax["tax_record_retention_days"], tax["tax_record_cleanup_batch_size"]
-            )
-        if tax["is_tax"]:
-            plugin.fishing_service.start_daily_tax_task()
-        else:
-            # stop 会 join 线程最多 5 秒，放到线程池里避免卡住面板请求
-            await asyncio.to_thread(plugin.fishing_service.stop_daily_tax_task)
-        if not saved:
-            return {"message": "税收设置已在当前进程生效，但未能写入配置文件，重启后会恢复原值"}
-        return {"message": "税收设置已保存并立即生效"}
-
-    def _persist_tax_config(self, tax: dict) -> bool:
-        config = getattr(self.p, "astrbot_config", None)
-        if config is None:
-            return False
-        try:
-            merged = dict(config.get("tax", {}) or {})
-            merged.update(tax)
-            config["tax"] = merged
-            if hasattr(config, "save_config"):
-                config.save_config()
-                return True
-        except Exception as exc:
-            logger.warning(f"[钓鱼管理] 保存税收配置失败: {exc}")
-        return False
-
-    def tax_waive(self, query, body):
-        user = self._user_or_error(body.get("user_id"))
-        amount = _int(body.get("amount"), "减免金额", optional=True, minimum=1)
-        return _check(self.p.bank_service.admin_waive_tax_debt(user.user_id, amount))

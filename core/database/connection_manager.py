@@ -67,7 +67,7 @@ class DatabaseConnectionManager:
         """在单个写事务内执行多条语句，异常时整体回滚并释放写锁。
 
         与 get_connection 的区别是显式接管 BEGIN/COMMIT，供需要跨多张表
-        保持原子性的仓储使用（如银行的钱包<->银行余额划转）。
+        保持原子性的仓储使用。
         """
         conn = self._get_connection()
         cursor = conn.cursor()

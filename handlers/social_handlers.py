@@ -29,8 +29,6 @@ async def ranking(plugin: "FishingPlugin", event: AstrMessageEvent):
             ranking_type = "total_weight_caught"
         elif sort_key in ["历史", "最高", "max", "history", "历史最高"]:
             ranking_type = "max_coins"
-        elif sort_key in ["总资产", "资产", "财富", "assets"]:
-            ranking_type = "total_assets"
 
     # 1. 从服务层获取基础排行榜数据（现在已包含 user_id 和 current_title_id）
     user_data = plugin.user_service.get_leaderboard_data(sort_by=ranking_type).get(
@@ -266,24 +264,3 @@ async def view_achievements(plugin: "FishingPlugin", event: AstrMessageEvent):
         yield event.plain_result(message)
     else:
         yield event.plain_result("❌ 您还没有任何成就，快去完成任务或参与活动获取吧！")
-
-
-async def tax_record(plugin: "FishingPlugin", event: AstrMessageEvent):
-    """查看税收记录"""
-    from ..utils import safe_datetime_handler
-
-    user_id = plugin._get_effective_user_id(event)
-    result = plugin.user_service.get_tax_record(user_id)
-    if result and result["success"]:
-        records = result.get("records", [])
-        if not records:
-            yield event.plain_result("📜 您还没有税收记录。")
-            return
-        message = "【📜 税收记录】\n\n"
-        for record in records:
-            message += f"⏱️ 时间: {safe_datetime_handler(record['timestamp'])}\n"
-            message += f"💰 金额: {record['amount']} 金币\n"
-            message += f"📊 描述: {record['tax_type']}\n\n"
-        yield event.plain_result(message)
-    else:
-        yield event.plain_result(f"❌ 查看税收记录失败：{result.get('message', '未知错误')}")

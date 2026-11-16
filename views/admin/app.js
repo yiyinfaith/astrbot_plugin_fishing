@@ -14,9 +14,7 @@ const state = {
   catalog: null,
   data: {},
   users: { page: 1, search: '' },
-  bank: { page: 1, search: '' },
   market: { page: 1, item_type: '', min_price: '', max_price: '', search: '' },
-  tax: { user_id: '', tax_type: '', start_date: '', end_date: '', limit: 200 },
   templates: { kind: 'fish', search: '', page: 1 },
   dialog: null,
   confirm: null,
@@ -28,8 +26,6 @@ const state = {
 const NAV = [
   ['overview', '总览', 'dashboard'],
   ['users', '玩家', 'users'],
-  ['bank', '银行', 'bank'],
-  ['tax', '税收', 'percent'],
   ['market', '玩家市场', 'tag'],
   ['exchange', '交易所', 'chart'],
   ['shops', '商店', 'store'],
@@ -44,8 +40,6 @@ const NAV = [
 const ICONS = {
   dashboard: 'M13,3V9H21V3M13,21H21V11H13M3,21H11V15H3M3,13H11V3H3V13Z',
   users: 'M12,5.5A3.5,3.5 0 0,1 15.5,9A3.5,3.5 0 0,1 12,12.5A3.5,3.5 0 0,1 8.5,9A3.5,3.5 0 0,1 12,5.5M5,8C5.56,8 6.08,8.15 6.53,8.42C6.38,9.85 6.8,11.27 7.66,12.38C7.16,13.34 6.16,14 5,14A3,3 0 0,1 2,11A3,3 0 0,1 5,8M19,8A3,3 0 0,1 22,11A3,3 0 0,1 19,14C17.84,14 16.84,13.34 16.34,12.38C17.2,11.27 17.62,9.85 17.47,8.42C17.92,8.15 18.44,8 19,8M5.5,18.25C5.5,16.18 8.41,14.5 12,14.5C15.59,14.5 18.5,16.18 18.5,18.25V20H5.5V18.25M0,20V18.5C0,17.11 1.89,15.94 4.45,15.6C3.86,16.28 3.5,17.22 3.5,18.25V20H0M24,20H20.5V18.25C20.5,17.22 20.14,16.28 19.55,15.6C22.11,15.94 24,17.11 24,18.5V20Z',
-  bank: 'M11.5,1L2,6V8H21V6M16,10V17H19V10M2,22H21V19H2M10,10V17H13V10M4,10V17H7V10H4Z',
-  percent: 'M18.5,3.5L3.5,18.5L5.5,20.5L20.5,5.5M7,4A3,3 0 0,0 4,7A3,3 0 0,0 7,10A3,3 0 0,0 10,7A3,3 0 0,0 7,4M17,14A3,3 0 0,0 14,17A3,3 0 0,0 17,20A3,3 0 0,0 20,17A3,3 0 0,0 17,14Z',
   tag: 'M5.5,7A1.5,1.5 0 0,1 4,5.5A1.5,1.5 0 0,1 5.5,4A1.5,1.5 0 0,1 7,5.5A1.5,1.5 0 0,1 5.5,7M21.41,11.58L12.41,2.58C12.05,2.22 11.55,2 11,2H4C2.89,2 2,2.89 2,4V11C2,11.55 2.22,12.05 2.59,12.41L11.58,21.41C11.95,21.77 12.45,22 13,22C13.55,22 14.05,21.77 14.41,21.41L21.41,14.41C21.78,14.05 22,13.55 22,13C22,12.44 21.77,11.94 21.41,11.58Z',
   chart: 'M16,11.78L20.24,4.45L21.97,5.45L16.74,14.5L10.23,10.75L5.46,19H22V21H2V3H4V17.54L9.5,8L16,11.78Z',
   store: 'M12,18H6V14H12M21,14V12L20,7H4L3,12V14H4V20H14V14H18V20H20V14M20,4H4V6H20V4Z',
@@ -234,8 +228,6 @@ const LOADERS = {
     if (state.sub?.type === 'inventory') { state.data.inventory = await get('users/inventory', { user_id: state.sub.user_id }); return; }
     state.data.users = await get('users', { page: state.users.page, search: state.users.search });
   },
-  bank: async () => { state.data.bank = await get('bank', { page: state.bank.page, search: state.bank.search }); },
-  tax: async () => { const result = await get('tax', state.tax); state.data.tax = result; Object.assign(state.tax, result.filters); },
   market: async () => { state.data.market = await get('market', state.market); },
   exchange: async () => { state.data.exchange = await get('exchange'); },
   shops: async () => {
@@ -280,15 +272,13 @@ function overviewView() {
   const o = state.data.overview;
   if (!o) return shell('总览', '', '<div class="panel empty">正在加载…</div>');
   const c = o.counts || {};
-  const bank = o.bank || {};
-  const tax = o.tax_today || {};
+  const avg = value => (o.users ? Math.round((value || 0) / o.users) : 0);
   const market = o.market || {};
   const contentRows = [
     ['鱼类模板', c.fish, 'templates', 'fish'], ['鱼竿模板', c.rods, 'templates', 'rods'], ['鱼饵模板', c.baits, 'templates', 'baits'],
     ['饰品模板', c.accessories, 'templates', 'accessories'], ['道具模板', c.items, 'templates', 'items'], ['称号', c.titles, 'titles', ''],
   ].map(([label, value, tab, kind]) => `<div class="row"><h4>${label}</h4><button type="button" class="btn text" data-action="goto" data-tab="${tab}" data-kind="${kind}">${fmt(value)} 条</button></div>`).join('');
   const runRows = [
-    ['每日资产税', o.tax_enabled ? badge('已开启', 'good') : badge('已关闭', 'off'), 'tax'],
     ['钓鱼区域', `${fmt(c.active_zones)} / ${fmt(c.zones)} 个开放`, 'zones'],
     ['商店 / 卡池', `${fmt(c.shops)} 个商店 · ${fmt(c.gacha_pools)} 个卡池`, 'shops'],
     ['市场挂单', `${fmt(market.total_listings)} 单`, 'market'],
@@ -297,9 +287,9 @@ function overviewView() {
   return shell('总览', '玩家、资产与游戏内容的实时概况。', `<div class="stack">
     <section class="grid metrics">
       ${metric('注册玩家', fmt(o.users), `${fmt(o.auto_fishing_users)} 人开启自动钓鱼`)}
-      ${metric('钱包金币总量', fmt(o.coins_total), `高级货币 ${fmt(o.premium_total)}`)}
-      ${metric('银行活期总额', fmt(bank.total_account_balance), `${fmt(bank.account_count)} 个账户 · 定期本金 ${fmt(bank.active_fixed_principal)}`)}
-      ${metric('今日税收', fmt(tax.total_tax), `${fmt(tax.record_count)} 笔 · ${fmt(tax.user_count)} 人`)}
+      ${metric('金币总量', fmt(o.coins_total), `人均 ${fmt(avg(o.coins_total))}`)}
+      ${metric('高级货币总量', fmt(o.premium_total), `人均 ${fmt(avg(o.premium_total))}`)}
+      ${metric('市场挂单', fmt(market.total_listings), `鱼竿 ${fmt(market.rod_count)} · 饰品 ${fmt(market.accessory_count)} · 鱼 ${fmt(market.fish_count)}`)}
     </section>
     <section class="grid two">
       <div class="panel list-card"><h3>游戏内容</h3>${contentRows}</div>
@@ -322,15 +312,13 @@ function overviewView() {
 
 function usersView() {
   if (state.sub?.type === 'inventory') return inventoryView();
-  const d = state.data.users || { users: [], bank: {}, pagination: null };
+  const d = state.data.users || { users: [], pagination: null };
   const rows = d.users.map(u => {
-    const bank = d.bank?.[u.user_id] || {};
     const system = SYSTEM_USERS.has(u.user_id);
     return `<tr>
       <td><strong>${esc(u.nickname || '未设置昵称')}</strong>${system ? ` ${badge('系统', 'off')}` : ''}<span class="cell-sub">${esc(u.user_id)}</span></td>
       <td class="num">${fmt(u.coins)}</td>
       <td class="num">${fmt(u.premium_currency)}</td>
-      <td class="num">${fmt(bank.account_balance || 0)}${bank.tax_debt ? `<span class="cell-sub">欠税 ${fmt(bank.tax_debt)}</span>` : ''}</td>
       <td class="num">${fmt(u.total_fishing_count)}</td>
       <td>${u.auto_fishing_enabled ? badge('自动钓鱼', 'good') : badge('手动', 'off')}</td>
       <td class="nowrap">${time(u.last_login_time)}<span class="cell-sub">注册 ${time(u.created_at)}</span></td>
@@ -345,7 +333,7 @@ function usersView() {
       <button type="submit" class="btn tonal">查询</button>
       <button type="button" class="btn primary" data-action="user-create">${icon('plus')}新建玩家</button>
     </form>
-    ${table(['玩家', { label: '金币', cls: 'num' }, { label: '高级货币', cls: 'num' }, { label: '银行活期', cls: 'num' }, { label: '钓鱼次数', cls: 'num' }, '状态', '最后签到', '操作'], rows, '没有匹配的玩家。')}
+    ${table(['玩家', { label: '金币', cls: 'num' }, { label: '高级货币', cls: 'num' }, { label: '钓鱼次数', cls: 'num' }, '状态', '最后签到', '操作'], rows, '没有匹配的玩家。')}
     ${pagination(d.pagination, 'users')}
   </div>`);
 }
@@ -369,15 +357,14 @@ function userFormBody(u = {}) {
 
 async function openUserDetail(userId) {
   const d = await get('users/detail', { user_id: userId });
-  const u = d.user; const bank = d.bank || {};
+  const u = d.user;
   const titleRows = (d.titles || []).map(t => `<div class="row"><div><h4>${esc(t.name)} ${t.is_current ? badge('佩戴中', 'good') : ''}</h4><p>${esc(t.description || '')}</p></div><button type="button" class="btn text danger" data-action="title-revoke" data-user="${esc(u.user_id)}" data-name="${esc(t.name)}">移除</button></div>`).join('') || '<div class="empty">还没有称号。</div>';
   const titleChoices = [['', '选择要授予的称号'], ...(state.catalog?.titles || []).map(t => [t.name, t.name])];
   openDialog({
     form: 'title-grant', title: u.nickname || u.user_id, subtitle: `用户 ID：${u.user_id}`, size: 'wide', submit: '授予称号', userId: u.user_id,
     body: () => `<dl class="info-grid">
       ${[['金币', fmt(u.coins)], ['高级货币', fmt(u.premium_currency)], ['历史最高金币', fmt(u.max_coins)], ['累计赚取金币', fmt(u.total_coins_earned)],
-        ['银行活期', `${fmt(bank.account_balance)}（可用 ${fmt(bank.available_balance)}）`], ['定期', `${fmt(bank.active_fixed_count)} 笔 · 本金 ${fmt(bank.active_fixed_principal)}`],
-        ['欠税', fmt(bank.tax_debt)], ['钓鱼次数', fmt(u.total_fishing_count)], ['总重量', `${fmt(u.total_weight_caught)} g`], ['鱼塘容量', fmt(u.fish_pond_capacity)],
+        ['钓鱼次数', fmt(u.total_fishing_count)], ['总重量', `${fmt(u.total_weight_caught)} g`], ['鱼塘容量', fmt(u.fish_pond_capacity)],
         ['当前区域', `#${u.fishing_zone_id}`], ['自动钓鱼', u.auto_fishing_enabled ? '已开启' : '已关闭'],
         ['装备鱼竿', d.equipped_rod ? `${d.equipped_rod.name} +${d.equipped_rod.refine_level}` : '无'], ['装备饰品', d.equipped_accessory ? `${d.equipped_accessory.name} +${d.equipped_accessory.refine_level}` : '无'],
         ['当前称号', d.current_title || '无'], ['连续签到', `${fmt(u.consecutive_login_days)} 天`], ['注册时间', time(u.created_at)], ['最后签到', time(u.last_login_time)],
@@ -428,87 +415,6 @@ function itemPickerFields({ types = ['fish', 'rod', 'accessory', 'bait', 'item']
     ${field({ name: 'quantity', label: '数量', type: 'number', value: quantity, min: 1 })}
     ${quality ? `<div class="field" data-show-for="fish"><label for="f_quality_level">品质</label><select id="f_quality_level" name="quality_level">${options([[0, '普通'], [1, '高品质']], 0)}</select></div>` : ''}
   </div>`;
-}
-
-// ---------------------------------------------------------------------------
-// 银行
-// ---------------------------------------------------------------------------
-
-function bankView() {
-  const d = state.data.bank;
-  if (!d) return shell('银行', '', '<div class="panel empty">正在加载…</div>');
-  const t = d.totals || {};
-  const userRows = d.users.map(u => {
-    const b = d.summaries?.[u.user_id] || {};
-    return `<tr><td><strong>${esc(u.nickname || '未设置')}</strong><span class="cell-sub">${esc(u.user_id)}</span></td><td class="num">${fmt(u.coins)}</td><td class="num">${fmt(b.account_balance)}</td><td class="num">${fmt(b.available_balance)} / ${fmt(b.locked_balance)}</td><td class="num">${fmt(b.pending_reservation_amount)}</td><td class="num">${fmt(b.active_fixed_count)} 笔 · ${fmt(b.active_fixed_principal)}</td><td class="nowrap">${time(b.next_maturity)}</td><td class="num">${b.tax_debt ? `<span class="badge bad">${fmt(b.tax_debt)}</span>` : '0'}</td><td>${rowActions([act('调整活期', 'bank-adjust', { id: u.user_id }), act('取消预约', 'bank-cancel', { id: u.user_id })])}</td></tr>`;
-  });
-  const depositRows = (d.fixed_deposits || []).map(row => { const x = row.deposit; return `<tr><td>#${x.deposit_id}</td><td><strong>${esc(row.nickname || x.user_id)}</strong><span class="cell-sub">${esc(x.user_id)}</span></td><td class="num">${fmt(x.principal)}</td><td class="num">${x.term_days} 天 · ${pct(x.interest_rate)}</td><td class="num">${fmt(x.expected_interest)}</td><td class="nowrap">${time(x.started_at)}</td><td class="nowrap">${time(x.matures_at)}</td><td>${badge({ active: '进行中', completed: '已领取', cancelled: '已提前取出' }[x.status] || x.status, x.status === 'active' ? 'good' : 'off')}</td></tr>`; });
-  const txRows = (d.transactions || []).map(row => { const x = row.transaction; return `<tr><td class="nowrap">${time(x.created_at)}</td><td><strong>${esc(row.nickname || x.user_id)}</strong><span class="cell-sub">${esc(x.user_id)}</span></td><td>${esc(x.tx_type)}</td><td class="num">${fmt(x.amount)}</td><td class="num">${fmt(x.wallet_after)}</td><td class="num">${fmt(x.bank_after)}</td><td class="wrap-text">${esc(x.remark || '')}</td></tr>`; });
-  const terms = d.fixed_terms?.success ? Object.entries(d.fixed_terms.terms).map(([days, rate]) => `${days} 天 ${pct(rate)}`).join('　') : '定期存款未启用';
-  return shell('银行', '查看活期、定期与资金流水，必要时人工调整。', `<div class="stack">
-    ${d.enabled ? '' : '<div class="note"><strong>银行系统已在插件配置中关闭。</strong>玩家暂时无法使用存取款，这里的数据仍可查看。</div>'}
-    <section class="grid metrics">${metric('活期总额', fmt(t.total_account_balance), `可用 ${fmt(t.total_available_balance)} · 锁定 ${fmt(t.total_locked_balance)}`)}${metric('账户数', fmt(t.account_count), '已开户玩家')}${metric('定期本金', fmt(t.active_fixed_principal), `${fmt(t.active_fixed_count)} 笔进行中 · 预计利息 ${fmt(t.active_expected_interest)}`)}${metric('欠税总额', fmt(t.total_tax_debt), `${fmt(t.debt_user_count)} 人欠税`)}</section>
-    <section class="panel">
-      <form class="toolbar" data-filter="bank"><input class="grow" name="search" value="${esc(state.bank.search)}" placeholder="搜索用户 ID 或昵称（同时筛选定期和流水）" aria-label="搜索"><button type="submit" class="btn tonal">查询</button></form>
-      ${table(['玩家', { label: '钱包', cls: 'num' }, { label: '活期', cls: 'num' }, { label: '可用 / 锁定', cls: 'num' }, { label: '待取预约', cls: 'num' }, { label: '进行中定期', cls: 'num' }, '下次到期', { label: '欠税', cls: 'num' }, '操作'], userRows, '没有匹配的玩家。')}
-      ${pagination(d.pagination, 'bank')}
-    </section>
-    <section class="panel"><div class="panel-head"><div><h3>定期存款</h3><p>${esc(terms)}${d.fixed_terms?.success ? `；提前取出违约金 ${pct(d.fixed_terms.early_withdraw_penalty_rate, 1)}` : ''}</p></div></div>${table(['编号', '玩家', { label: '本金', cls: 'num' }, { label: '期限 / 利率', cls: 'num' }, { label: '预计利息', cls: 'num' }, '开始', '到期', '状态'], depositRows, '暂无定期存款。')}</section>
-    <section class="panel"><h3>最近流水</h3>${table(['时间', '玩家', '类型', { label: '金额', cls: 'num' }, { label: '钱包后', cls: 'num' }, { label: '活期后', cls: 'num' }, '备注'], txRows, '暂无流水。')}</section>
-  </div>`);
-}
-
-// ---------------------------------------------------------------------------
-// 税收
-// ---------------------------------------------------------------------------
-
-function taxView() {
-  const d = state.data.tax;
-  if (!d) return shell('税收', '', '<div class="panel empty">正在加载…</div>');
-  const c = d.config; const s = d.summary || {}; const labels = state.meta?.tax_labels || {};
-  const pairs = obj => Object.entries(obj || {});
-  const previewRows = (d.preview || []).map(r => `<tr><td class="num">${fmt(r.lower)} ~ ${fmt(r.upper)}</td><td class="num">${pct(r.rate)}</td></tr>`);
-  const recordRows = (d.records || []).map(r => `<tr><td class="nowrap">${time(r.timestamp)}</td><td><strong>${esc(r.nickname || '未设置')}</strong><span class="cell-sub">${esc(r.user_id)}</span></td><td>${esc(r.tax_type)}</td><td class="num">${fmt(r.tax_amount)}</td><td class="num">${pct(r.tax_rate)}</td><td class="num">${fmt(r.original_amount)}</td><td class="num">${fmt(r.balance_after)}</td></tr>`);
-  const debtRows = (d.debts || []).map(x => `<tr><td><strong>${esc(x.nickname || '未设置')}</strong><span class="cell-sub">${esc(x.user_id)}</span></td><td class="num"><span class="badge bad">${fmt(x.debt_amount)}</span></td><td class="num">${fmt(x.wallet_balance)}</td><td class="num">${fmt(x.account_balance)}</td><td class="num">${fmt(x.locked_balance)}</td><td class="nowrap">${time(x.updated_at)}</td><td>${rowActions([act('减免', 'tax-waive', { id: x.user_id, debt: x.debt_amount })])}</td></tr>`);
-  const typeChoices = [['', '全部税种'], ...(s.by_type || []).map(t => [t.tax_type, t.tax_type])];
-  if (state.tax.tax_type && !typeChoices.some(([v]) => v === state.tax.tax_type)) typeChoices.push([state.tax.tax_type, state.tax.tax_type]);
-  return shell('税收', '每日资产税、转账手续费与欠税管理。', `<div class="stack">
-    <section class="panel"><div class="panel-head"><div><h3>税收设置</h3><p>保存后立即生效，并写回插件配置。</p></div></div>
-      <form data-form="tax-save" novalidate><div class="form-grid three">
-        ${switchField({ name: 'is_tax', label: '启用每日资产税', checked: !!c.is_tax, cls: 'full' })}
-        ${field({ name: 'threshold', label: '起征点', type: 'number', value: c.threshold, min: 0 })}
-        ${field({ name: 'step_coins', label: '金额档位步长', type: 'number', value: c.step_coins, min: 1 })}
-        ${field({ name: 'step_rate', label: '每档增加税率', type: 'number', value: c.step_rate, min: 0, max: 1, step: 'any', hint: '0.01 表示每档 +1%' })}
-        ${field({ name: 'min_rate', label: '起点税率', type: 'number', value: c.min_rate, min: 0, max: 1, step: 'any' })}
-        ${field({ name: 'max_rate', label: '最高税率', type: 'number', value: c.max_rate, min: 0, max: 1, step: 'any' })}
-        ${field({ name: 'transfer_tax_rate', label: '转账手续费率', type: 'number', value: c.transfer_tax_rate, min: 0, max: 1, step: 'any' })}
-        ${selectField({ name: 'asset_scope', label: '资产统计范围', choices: pairs(labels.asset_scope), value: c.asset_scope })}
-        ${selectField({ name: 'deduct_scope', label: '扣款来源', choices: pairs(labels.deduct_scope), value: c.deduct_scope })}
-        ${selectField({ name: 'taxable_mode', label: '计税模式', choices: pairs(labels.taxable_mode), value: c.taxable_mode })}
-        ${field({ name: 'debt_surcharge_rate', label: '欠税滞纳金率（每日）', type: 'number', value: c.debt_surcharge_rate, min: 0, max: 1, step: 'any' })}
-        ${field({ name: 'tax_record_retention_days', label: '税收记录保留天数', type: 'number', value: c.tax_record_retention_days, min: 1 })}
-        ${field({ name: 'tax_record_cleanup_batch_size', label: '单次清理条数', type: 'number', value: c.tax_record_cleanup_batch_size, min: 1 })}
-      </div><div class="form-actions" style="margin-top:16px"><button type="submit" class="btn primary">保存税收设置</button></div></form>
-    </section>
-    <section class="grid two">
-      <div class="panel"><h3>税率档位预览</h3>${table([{ label: '统计资产区间', cls: 'num' }, { label: '税率', cls: 'num' }], previewRows)}</div>
-      <div class="panel"><h3>欠税减免</h3><p>欠税 ${fmt(d.debt_summary?.total_debt)} 金币，涉及 ${fmt(d.debt_summary?.debt_user_count)} 人。</p>
-        <form data-form="tax-waive-inline" novalidate><div class="form-grid">${field({ name: 'user_id', label: '用户 ID', required: true })}${field({ name: 'amount', label: '减免金额', type: 'number', min: 1, hint: '留空表示全额减免' })}</div><div class="form-actions" style="margin-top:16px"><button type="submit" class="btn tonal">减免欠税</button></div></form></div>
-    </section>
-    <section class="panel"><h3>税收记录</h3>
-      <form class="toolbar" data-filter="tax">
-        <input name="user_id" value="${esc(state.tax.user_id)}" placeholder="用户 ID" aria-label="用户 ID">
-        <select name="tax_type" aria-label="税种">${options(typeChoices, state.tax.tax_type)}</select>
-        <input name="start_date" type="date" value="${esc(state.tax.start_date)}" aria-label="开始日期">
-        <input name="end_date" type="date" value="${esc(state.tax.end_date)}" aria-label="结束日期">
-        <select name="limit" aria-label="条数">${options([[50, '50 条'], [200, '200 条'], [500, '500 条'], [1000, '1000 条']], state.tax.limit)}</select>
-        <button type="submit" class="btn tonal">查询</button>
-      </form>
-      <div class="grid metrics" style="margin:16px 0">${metric('税收合计', fmt(s.total_tax), `${fmt(s.record_count)} 笔`)}${metric('纳税人数', fmt(s.user_count), '所选时间段')}${metric('每日资产税', fmt(s.daily_tax_total), `${fmt(s.daily_tax_count)} 笔`)}${metric('其他税种', fmt((s.total_tax || 0) - (s.daily_tax_total || 0)), (s.by_type || []).filter(x => x.tax_type !== '每日资产税').map(x => x.tax_type).join('、') || '无')}</div>
-      ${table(['时间', '玩家', '税种', { label: '税额', cls: 'num' }, { label: '税率', cls: 'num' }, { label: '税前', cls: 'num' }, { label: '税后', cls: 'num' }], recordRows, '所选时间段没有税收记录。')}
-    </section>
-    <section class="panel"><h3>欠税名单</h3>${table(['玩家', { label: '欠税', cls: 'num' }, { label: '钱包', cls: 'num' }, { label: '活期', cls: 'num' }, { label: '锁定', cls: 'num' }, '更新时间', '操作'], debtRows, '没有欠税玩家。')}</section>
-  </div>`);
 }
 
 // ---------------------------------------------------------------------------
@@ -916,7 +822,7 @@ function titleFormBody(t = {}) {
 function opsView() {
   const imp = state.data.impersonation?.rows || [];
   const impRows = imp.map(r => `<tr><td>${esc(r.admin_id)}</td><td><strong>${esc(r.target_nickname || '未知玩家')}</strong><span class="cell-sub">${esc(r.target_id)}</span></td><td>${rowActions([act('结束代理', 'imp-stop', { id: r.admin_id }, true)])}</td></tr>`);
-  return shell('全服操作', '原管理员指令对应的批量操作。系统账号（市场托管、系统银行）不参与。', `<div class="stack">
+  return shell('全服操作', '原管理员指令对应的批量操作。系统账号（如市场托管）不参与。', `<div class="stack">
     <section class="grid two">
       <div class="panel"><h3>全体货币</h3><p>给所有玩家发放或扣除金币、高级货币。扣除时余额不足的扣到 0。</p>
         <form data-form="broadcast-currency" novalidate><div class="form-grid">
@@ -952,7 +858,7 @@ function openBroadcastDialog(kind) {
 // 渲染
 // ---------------------------------------------------------------------------
 
-const VIEWS = { overview: overviewView, users: usersView, bank: bankView, tax: taxView, market: marketView, exchange: exchangeView, shops: shopsView, gacha: gachaView, zones: zonesView, templates: templatesView, titles: titlesView, ops: opsView };
+const VIEWS = { overview: overviewView, users: usersView, market: marketView, exchange: exchangeView, shops: shopsView, gacha: gachaView, zones: zonesView, templates: templatesView, titles: titlesView, ops: opsView };
 
 function render() {
   closeMenu();
@@ -989,7 +895,7 @@ function applyShowFor(root) {
 // ---------------------------------------------------------------------------
 
 function findUser(id) {
-  return state.data.users?.users?.find(u => u.user_id === id) || state.data.bank?.users?.find(u => u.user_id === id);
+  return state.data.users?.users?.find(u => u.user_id === id);
 }
 
 const ACTIONS = {
@@ -1014,10 +920,6 @@ const ACTIONS = {
   'rod-edit': b => openDialog({ form: 'rod-edit', title: '编辑鱼竿', subtitle: `实例 #${b.dataset.id}`, userId: b.dataset.user, instanceId: b.dataset.id, body: () => `<div class="form-grid">${field({ name: 'refine_level', label: '精炼等级', type: 'number', min: 1, max: 10, value: b.dataset.refine })}${field({ name: 'durability', label: '耐久度', type: 'number', min: 0, value: b.dataset.durability, hint: '留空表示无限耐久' })}</div>` }),
   'acc-edit': b => openDialog({ form: 'acc-edit', title: '编辑饰品', subtitle: `实例 #${b.dataset.id}`, userId: b.dataset.user, instanceId: b.dataset.id, body: () => `<div class="form-grid">${field({ name: 'refine_level', label: '精炼等级', type: 'number', min: 1, max: 10, value: b.dataset.refine, cls: 'full' })}</div>` }),
 
-  // 银行与税收
-  'bank-adjust': b => openDialog({ form: 'bank-adjust', title: '调整银行活期', subtitle: `用户 ${b.dataset.id}`, userId: b.dataset.id, body: () => `<div class="form-grid">${field({ name: 'delta', label: '增减金额', type: 'number', required: true, hint: '正数增加，负数减少', cls: 'full' })}${field({ name: 'remark', label: '备注', cls: 'full', placeholder: '会记入银行流水' })}</div>` }),
-  'bank-cancel': b => openDialog({ form: 'bank-cancel', title: '取消取款预约', subtitle: `用户 ${b.dataset.id}`, userId: b.dataset.id, submit: '取消预约', danger: true, body: () => `<div class="form-grid">${field({ name: 'reservation_id', label: '预约编号', type: 'number', min: 1, required: true, cls: 'full', hint: '玩家可在“钓鱼银行”中看到预约编号' })}</div>` }),
-  'tax-waive': b => openDialog({ form: 'tax-waive', title: '减免欠税', subtitle: `用户 ${b.dataset.id} 当前欠税 ${fmt(b.dataset.debt)}`, userId: b.dataset.id, submit: '减免', body: () => `<div class="form-grid">${field({ name: 'amount', label: '减免金额', type: 'number', min: 1, cls: 'full', hint: '留空表示全额减免' })}</div>` }),
 
   // 市场与交易所
   'market-price': b => openDialog({ form: 'market-price', title: '修改价格', subtitle: b.dataset.name, marketId: b.dataset.id, body: () => `<div class="form-grid">${field({ name: 'price', label: '新单价', type: 'number', min: 1, value: b.dataset.price, required: true, cls: 'full' })}</div>` }),
@@ -1083,11 +985,6 @@ const FORMS = {
   'inv-remove': (v, d) => post('users/inventory/remove', { quantity: v.quantity, user_id: d.userId, item_type: d.itemType, item_id: d.itemId }),
   'rod-edit': (v, d) => post('users/inventory/rod', { ...v, user_id: d.userId, instance_id: d.instanceId }),
   'acc-edit': (v, d) => post('users/inventory/accessory', { ...v, user_id: d.userId, instance_id: d.instanceId }),
-  'bank-adjust': (v, d) => post('bank/adjust', { ...v, user_id: d.userId }),
-  'bank-cancel': (v, d) => post('bank/cancel-reservation', { ...v, user_id: d.userId }),
-  'tax-waive': (v, d) => post('tax/waive', { ...v, user_id: d.userId }),
-  'tax-waive-inline': v => post('tax/waive', v),
-  'tax-save': v => post('tax/save', v),
   'market-price': (v, d) => post('market/price', { ...v, market_id: d.marketId }),
   shop: (v, d) => post('shops/save', { ...v, shop_id: d.shopId || '' }),
   'shop-item': async (v, d) => { readRows(); return post('shops/items/save', { ...formValues(document.querySelector('form[data-form="shop-item"]')), shop_id: state.data.shop.shop.shop_id, item_id: d.itemId, costs: d.costs, rewards: d.rewards }); },

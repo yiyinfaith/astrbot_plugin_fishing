@@ -13,7 +13,7 @@ from ..repositories.abstract_repository import (
     AbstractItemTemplateRepository,
     AbstractExchangeRepository,
 )
-from ..domain.models import MarketListing, TaxRecord
+from ..domain.models import MarketListing
 
 
 class MarketService:
@@ -319,14 +319,6 @@ class MarketService:
         # 扣除税费
         seller.coins -= tax_cost
         self.user_repo.update(seller)
-
-        # 记录税收日志
-        tax_log = TaxRecord(
-            tax_id=0, user_id=user_id, tax_amount=tax_cost, tax_rate=tax_rate,
-            original_amount=total_price, balance_after=seller.coins, tax_type="市场交易税",
-            timestamp=datetime.now()
-        )
-        self.log_repo.add_tax_record(tax_log)
 
         # 创建市场条目
         new_listing = MarketListing(
