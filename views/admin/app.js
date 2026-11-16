@@ -27,7 +27,6 @@ const NAV = [
   ['overview', '总览', 'dashboard'],
   ['users', '玩家', 'users'],
   ['market', '玩家市场', 'tag'],
-  ['exchange', '交易所', 'chart'],
   ['shops', '商店', 'store'],
   ['gacha', '抽卡池', 'gift'],
   ['zones', '钓鱼区域', 'waves'],
@@ -41,7 +40,6 @@ const ICONS = {
   dashboard: 'M13,3V9H21V3M13,21H21V11H13M3,21H11V15H3M3,13H11V3H3V13Z',
   users: 'M12,5.5A3.5,3.5 0 0,1 15.5,9A3.5,3.5 0 0,1 12,12.5A3.5,3.5 0 0,1 8.5,9A3.5,3.5 0 0,1 12,5.5M5,8C5.56,8 6.08,8.15 6.53,8.42C6.38,9.85 6.8,11.27 7.66,12.38C7.16,13.34 6.16,14 5,14A3,3 0 0,1 2,11A3,3 0 0,1 5,8M19,8A3,3 0 0,1 22,11A3,3 0 0,1 19,14C17.84,14 16.84,13.34 16.34,12.38C17.2,11.27 17.62,9.85 17.47,8.42C17.92,8.15 18.44,8 19,8M5.5,18.25C5.5,16.18 8.41,14.5 12,14.5C15.59,14.5 18.5,16.18 18.5,18.25V20H5.5V18.25M0,20V18.5C0,17.11 1.89,15.94 4.45,15.6C3.86,16.28 3.5,17.22 3.5,18.25V20H0M24,20H20.5V18.25C20.5,17.22 20.14,16.28 19.55,15.6C22.11,15.94 24,17.11 24,18.5V20Z',
   tag: 'M5.5,7A1.5,1.5 0 0,1 4,5.5A1.5,1.5 0 0,1 5.5,4A1.5,1.5 0 0,1 7,5.5A1.5,1.5 0 0,1 5.5,7M21.41,11.58L12.41,2.58C12.05,2.22 11.55,2 11,2H4C2.89,2 2,2.89 2,4V11C2,11.55 2.22,12.05 2.59,12.41L11.58,21.41C11.95,21.77 12.45,22 13,22C13.55,22 14.05,21.77 14.41,21.41L21.41,14.41C21.78,14.05 22,13.55 22,13C22,12.44 21.77,11.94 21.41,11.58Z',
-  chart: 'M16,11.78L20.24,4.45L21.97,5.45L16.74,14.5L10.23,10.75L5.46,19H22V21H2V3H4V17.54L9.5,8L16,11.78Z',
   store: 'M12,18H6V14H12M21,14V12L20,7H4L3,12V14H4V20H14V14H18V20H20V14M20,4H4V6H20V4Z',
   gift: 'M22,12V20A2,2 0 0,1 20,22H4A2,2 0 0,1 2,20V12A1,1 0 0,1 1,11V8A2,2 0 0,1 3,6H6.17C6.06,5.69 6,5.35 6,5A3,3 0 0,1 9,2C10,2 10.88,2.5 11.43,3.24V3.23L12,4L12.57,3.23V3.24C13.12,2.5 14,2 15,2A3,3 0 0,1 18,5C18,5.35 17.94,5.69 17.83,6H21A2,2 0 0,1 23,8V11A1,1 0 0,1 22,12M4,20H11V12H4V20M20,20V12H13V20H20M9,4A1,1 0 0,0 8,5A1,1 0 0,0 9,6A1,1 0 0,0 10,5A1,1 0 0,0 9,4M15,4A1,1 0 0,0 14,5A1,1 0 0,0 15,6A1,1 0 0,0 16,5A1,1 0 0,0 15,4M3,8V10H11V8H3M13,8V10H21V8H13Z',
   waves: 'M2,18C4.22,17 6.44,16 8.67,16C10.89,16 13.11,18 15.33,18C17.56,18 19.78,16 22,16V19C19.78,19 17.56,21 15.33,21C13.11,21 10.89,19 8.67,19C6.44,19 4.22,20 2,21V18M2,12C4.22,11 6.44,10 8.67,10C10.89,10 13.11,12 15.33,12C17.56,12 19.78,10 22,10V13C19.78,13 17.56,15 15.33,15C13.11,15 10.89,13 8.67,13C6.44,13 4.22,14 2,15V12M2,6C4.22,5 6.44,4 8.67,4C10.89,4 13.11,6 15.33,6C17.56,6 19.78,4 22,4V7C19.78,7 17.56,9 15.33,9C13.11,9 10.89,7 8.67,7C6.44,7 4.22,8 2,9V6Z',
@@ -59,7 +57,7 @@ const ICONS = {
 };
 const icon = name => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="${ICONS[name]}"/></svg>`;
 
-const TYPE_LABELS = { fish: '鱼类', rod: '鱼竿', bait: '鱼饵', accessory: '饰品', item: '道具', coins: '金币', premium: '高级货币', titles: '称号', commodity: '大宗商品' };
+const TYPE_LABELS = { fish: '鱼类', rod: '鱼竿', bait: '鱼饵', accessory: '饰品', item: '道具', coins: '金币', premium: '高级货币', titles: '称号' };
 const SHOP_TYPES = { normal: '普通商店', premium: '高级商店', limited: '限时商店' };
 const SYSTEM_USERS = new Set(['MARKET', 'SYSTEM']);
 const SENTIMENT = { panic: '恐慌', pessimistic: '悲观', neutral: '中性', optimistic: '乐观', euphoric: '狂热' };
@@ -229,7 +227,6 @@ const LOADERS = {
     state.data.users = await get('users', { page: state.users.page, search: state.users.search });
   },
   market: async () => { state.data.market = await get('market', state.market); },
-  exchange: async () => { state.data.exchange = await get('exchange'); },
   shops: async () => {
     if (state.sub?.type === 'shop') { state.data.shop = await get('shops/items', { shop_id: state.sub.shop_id }); return; }
     state.data.shops = await get('shops');
@@ -428,51 +425,17 @@ function marketView() {
   const rows = d.rows.map(x => `<tr><td>#${x.market_id}</td><td><strong>${esc(x.item_name)}</strong>${x.quality_level ? ` ${badge('高品质', 'warn')}` : ''}<span class="cell-sub">${esc(x.item_description || '')}</span></td><td>${esc(TYPE_LABELS[x.item_type] || x.item_type)}</td><td class="num">${['rod', 'accessory'].includes(x.item_type) ? `+${x.refine_level}` : '-'}</td><td class="num">${fmt(x.quantity)}</td><td class="num">${fmt(x.price)}</td><td><strong>${esc(x.seller_nickname || x.user_id)}</strong>${x.is_anonymous ? ` ${badge('匿名', 'off')}` : ''}<span class="cell-sub">${esc(x.user_id)}</span></td><td class="nowrap">${time(x.listed_at)}${x.expires_at ? `<span class="cell-sub">过期 ${time(x.expires_at)}</span>` : ''}</td><td>${rowActions([act('改价', 'market-price', { id: x.market_id, price: x.price, name: x.item_name }), act('下架', 'market-remove', { id: x.market_id, name: x.item_name }, true)])}</td></tr>`);
   const f = state.market;
   return shell('玩家市场', '查看玩家挂单，修改价格或强制下架（物品退回卖家）。', `<div class="stack">
-    <section class="grid metrics">${metric('挂单总数', fmt(s.total_listings), `筛选结果 ${fmt(s.filtered_listings)} 单`)}${metric('鱼类 / 道具', `${fmt(s.fish_count)} / ${fmt(s.item_count)}`, '按数量统计')}${metric('鱼竿 / 饰品', `${fmt(s.rod_count)} / ${fmt(s.accessory_count)}`, '按挂单统计')}${metric('大宗商品', fmt(s.commodity_count), `本页总价 ${fmt(s.total_value)}`)}</section>
+    <section class="grid metrics three">${metric('挂单总数', fmt(s.total_listings), `筛选结果 ${fmt(s.filtered_listings)} 单 · 本页总价 ${fmt(s.total_value)}`)}${metric('鱼类 / 道具', `${fmt(s.fish_count)} / ${fmt(s.item_count)}`, '按数量统计')}${metric('鱼竿 / 饰品', `${fmt(s.rod_count)} / ${fmt(s.accessory_count)}`, '按挂单统计')}</section>
     <section class="panel">
       <form class="toolbar" data-filter="market">
         <input class="grow" name="search" value="${esc(f.search)}" placeholder="搜索物品名或卖家" aria-label="搜索">
-        <select name="item_type" aria-label="物品类型">${options([['', '全部类型'], ['fish', '鱼类'], ['rod', '鱼竿'], ['accessory', '饰品'], ['item', '道具'], ['commodity', '大宗商品']], f.item_type)}</select>
+        <select name="item_type" aria-label="物品类型">${options([['', '全部类型'], ['fish', '鱼类'], ['rod', '鱼竿'], ['accessory', '饰品'], ['item', '道具']], f.item_type)}</select>
         <input name="min_price" type="number" min="0" value="${esc(f.min_price)}" placeholder="最低价" aria-label="最低价">
         <input name="max_price" type="number" min="0" value="${esc(f.max_price)}" placeholder="最高价" aria-label="最高价">
         <button type="submit" class="btn tonal">查询</button>
       </form>
       ${table(['ID', '商品', '类型', { label: '精炼', cls: 'num' }, { label: '数量', cls: 'num' }, { label: '单价', cls: 'num' }, '卖家', '上架时间', '操作'], rows, '没有符合条件的挂单。')}
       ${pagination(d.pagination, 'market')}
-    </section>
-  </div>`);
-}
-
-// ---------------------------------------------------------------------------
-// 交易所
-// ---------------------------------------------------------------------------
-
-function exchangeView() {
-  const d = state.data.exchange;
-  if (!d) return shell('交易所', '', '<div class="panel empty">正在加载…</div>');
-  const st = d.status || {}; const h = d.history || {}; const hold = d.holdings?.stats || {};
-  const ids = Object.keys(st.prices || {});
-  const cards = ids.map(id => {
-    const series = h.history?.[id] || [];
-    const prev = series.length > 1 ? series[series.length - 2] : null;
-    const now = st.prices[id];
-    const diff = prev ? (now - prev) / prev : null;
-    const trend = diff === null ? '暂无对比' : `<span class="${diff >= 0 ? 'trend-up' : 'trend-down'}">${diff >= 0 ? '▲' : '▼'} ${pct(Math.abs(diff))}</span> 较上次`;
-    const stats = hold.commodity_stats?.[id] || {};
-    return `<div class="metric"><span>${esc(st.commodities?.[id]?.name || id)}</span><strong>${fmt(now)}</strong><small>${trend}</small><p>${esc(st.commodities?.[id]?.description || '')}</p><p>持仓 ${fmt(stats.total_quantity)} 份 · ${fmt(stats.user_count)} 人</p></div>`;
-  }).join('');
-  const labels = h.labels || [];
-  const historyRows = labels.map((label, i) => `<tr><td class="nowrap">${esc(label)}</td>${ids.map(id => `<td class="num">${fmt(h.history?.[id]?.[i])}</td>`).join('')}</tr>`).reverse();
-  const holderRows = ids.flatMap(id => (hold.commodity_stats?.[id]?.users || []).map(u => `<tr><td>${esc(st.commodities?.[id]?.name || id)}</td><td>${esc(u.user_id)}</td><td class="num">${fmt(u.quantity)}</td></tr>`));
-  return shell('交易所', '大宗商品价格与玩家持仓。', `<div class="stack">
-    <section class="price-cards">${cards || '<div class="panel empty">暂无商品。</div>'}</section>
-    <section class="panel"><div class="panel-head"><div><h3>市场状态</h3><p>日期 ${esc(st.date || '-')} · 情绪 ${esc(SENTIMENT[st.market_sentiment] || st.market_sentiment || '-')} · 走势 ${esc(TREND[st.price_trend] || st.price_trend || '-')} · 供需 ${esc(st.supply_demand || '-')}</p></div>
-      <div class="page-actions"><button type="button" class="btn tonal" data-action="exchange-update">立即刷新价格</button><button type="button" class="btn tonal-danger" data-action="exchange-reset">重置为初始价格</button></div></div>
-      <div class="grid metrics three">${metric('持仓玩家', fmt(hold.total_users), '至少持有一种商品')}${metric('持仓总量', fmt(hold.total_holdings), '所有商品合计')}${metric('价格记录', fmt(labels.length), `最近 ${fmt(h.days || 7)} 天`)}</div>
-    </section>
-    <section class="grid two">
-      <div class="panel"><h3>价格历史</h3>${table(['时间', ...ids.map(id => ({ label: st.commodities?.[id]?.name || id, cls: 'num' }))], historyRows, '还没有价格记录。')}</div>
-      <div class="panel"><h3>持仓明细</h3>${table(['商品', '用户 ID', { label: '数量', cls: 'num' }], holderRows, '暂无玩家持仓。')}</div>
     </section>
   </div>`);
 }
@@ -858,7 +821,7 @@ function openBroadcastDialog(kind) {
 // 渲染
 // ---------------------------------------------------------------------------
 
-const VIEWS = { overview: overviewView, users: usersView, market: marketView, exchange: exchangeView, shops: shopsView, gacha: gachaView, zones: zonesView, templates: templatesView, titles: titlesView, ops: opsView };
+const VIEWS = { overview: overviewView, users: usersView, market: marketView, shops: shopsView, gacha: gachaView, zones: zonesView, templates: templatesView, titles: titlesView, ops: opsView };
 
 function render() {
   closeMenu();
@@ -921,11 +884,9 @@ const ACTIONS = {
   'acc-edit': b => openDialog({ form: 'acc-edit', title: '编辑饰品', subtitle: `实例 #${b.dataset.id}`, userId: b.dataset.user, instanceId: b.dataset.id, body: () => `<div class="form-grid">${field({ name: 'refine_level', label: '精炼等级', type: 'number', min: 1, max: 10, value: b.dataset.refine, cls: 'full' })}</div>` }),
 
 
-  // 市场与交易所
+  // 玩家市场
   'market-price': b => openDialog({ form: 'market-price', title: '修改价格', subtitle: b.dataset.name, marketId: b.dataset.id, body: () => `<div class="form-grid">${field({ name: 'price', label: '新单价', type: 'number', min: 1, value: b.dataset.price, required: true, cls: 'full' })}</div>` }),
   'market-remove': b => confirmAction({ title: '下架商品', message: `确定下架 #${b.dataset.id}「${b.dataset.name}」吗？物品会退回卖家。`, label: '下架', run: async () => { const r = await post('market/remove', { market_id: b.dataset.id }); await refresh(); return r; } }),
-  'exchange-update': () => confirmAction({ title: '刷新价格', message: '立即按市场规则生成一次新价格吗？', label: '刷新', danger: false, run: async () => { const r = await post('exchange/update'); await refresh(); return r; } }),
-  'exchange-reset': () => confirmAction({ title: '重置价格', message: '把所有商品价格恢复为初始值吗？', label: '重置', run: async () => { const r = await post('exchange/reset'); await refresh(); return r; } }),
 
   // 商店
   'shop-create': () => openDialog({ form: 'shop', title: '新建商店', size: 'wide', submit: '创建', body: () => shopFormBody() }),

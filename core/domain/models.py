@@ -136,39 +136,6 @@ class GachaPool:
         """允许通过属性名访问字段"""
         return getattr(self, item)
 
-@dataclass
-class Commodity:
-    """代表一种大宗商品的模板信息"""
-    commodity_id: str  # e.g., 'dried_fish', 'fish_roe', 'fish_oil'
-    name: str
-    description: str
-
-
-# ---------------------------------
-# 交易所实体 (Exchange Entities)
-# ---------------------------------
-
-@dataclass
-class Exchange:
-    """代表交易所的商品价格记录"""
-    date: str  # YYYY-MM-DD
-    time: str  # HH:MM:SS
-    commodity_id: str
-    price: int
-    update_type: str = "auto"  # 'auto' 或 'manual'
-    created_at: str = ""  # ISO格式时间戳
-
-@dataclass
-class UserCommodity:
-    """代表用户持有的一个具体的大宗商品实例"""
-    instance_id: int
-    user_id: str
-    commodity_id: str
-    quantity: int
-    purchase_price: int
-    purchased_at: datetime
-    expires_at: datetime
-
 # ---------------------------------
 # 用户数据实体 (User Data Entities)
 # ---------------------------------
@@ -215,8 +182,6 @@ class User:
     fish_pond_capacity: int = 480
     aquarium_capacity: int = 50  # 水族箱容量
     fishing_zone_id: int = 1  # 默认钓鱼区域ID
-    exchange_account_status: bool = False # 交易所账户状态
-    exchange_capacity_level: int = 0  # 交易所仓库升级等级
 
     # 装备信息
     equipped_rod_instance_id: Optional[int] = None
@@ -318,7 +283,7 @@ class MarketListing:
     item_instance_id: Optional[int] = None  # 实例ID，用于显示短码
     refine_level: int = 1
     quality_level: int = 0  # 品质等级（仅对鱼类有效，0=普通，1=高品质）
-    expires_at: Optional[datetime] = None  # 腐败日期，主要用于大宗商品
+    expires_at: Optional[datetime] = None  # 旧版本大宗商品的腐败日期，现已不再使用
     is_anonymous: bool = False  # 是否为匿名上架
 
     def __getitem__(self, item):

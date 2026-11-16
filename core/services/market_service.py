@@ -11,22 +11,12 @@ from ..repositories.abstract_repository import (
     AbstractUserRepository,
     AbstractLogRepository,
     AbstractItemTemplateRepository,
-    AbstractExchangeRepository,
 )
 from ..domain.models import MarketListing
 
 
 class MarketService:
     """封装与玩家交易市场相关的业务逻辑"""
-
-    EXCHANGE_CAPACITY_LEVEL_MULTIPLIERS = {
-        0: 1.0,
-        1: 1.5,
-        2: 2.0,
-        3: 2.5,
-        4: 3.0,
-    }
-    
 
     def __init__(
         self,
@@ -35,7 +25,6 @@ class MarketService:
         user_repo: AbstractUserRepository,
         log_repo: AbstractLogRepository,
         item_template_repo: AbstractItemTemplateRepository,
-        exchange_repo: AbstractExchangeRepository,
         config: Dict[str, Any]
     ):
         self.market_repo = market_repo
@@ -43,7 +32,6 @@ class MarketService:
         self.user_repo = user_repo
         self.log_repo = log_repo
         self.item_template_repo = item_template_repo
-        self.exchange_repo = exchange_repo
         self.config = config
         
         # 确保虚拟市场用户存在（用于托管上架的装备）
@@ -67,25 +55,10 @@ class MarketService:
             self.user_repo.add(market_user)
             logger.info("创建虚拟市场用户(MARKET)用于托管上架装备")
 
-    def _get_user_exchange_capacity(self, user) -> int:
-        base_capacity = int(self.config.get("exchange", {}).get("capacity", 1000))
-        level = max(0, min(getattr(user, "exchange_capacity_level", 0), max(self.EXCHANGE_CAPACITY_LEVEL_MULTIPLIERS)))
-        return int(base_capacity * self.EXCHANGE_CAPACITY_LEVEL_MULTIPLIERS.get(level, 1.0))
-
-    def _get_user_total_commodity_quantity(self, user_id: str) -> int:
-        inventory_quantity = sum(item.quantity for item in self.exchange_repo.get_user_commodities(user_id))
-        market_quantity = 0
-        listings, _ = self.market_repo.get_all_listings()
-        for listing in listings:
-            if listing.user_id == user_id and listing.item_type == "commodity":
-                market_quantity += listing.quantity
-        return inventory_quantity + market_quantity
-
     def cleanup_expired_listings(self):
         """
         清理过期的市场挂单。
         - 挂单超过5天的将返还给物主。
-        - 在市场上腐败的大宗商品将被直接移除。
         """
         try:
             listings, _ = self.market_repo.get_all_listings()
@@ -93,13 +66,7 @@ class MarketService:
             five_days_ago = now - timedelta(days=5)
 
             for listing in listings:
-                # 检查1: 大宗商品是否在市场上腐败
-                if listing.item_type == "commodity" and listing.expires_at and listing.expires_at < now:
-                    self.market_repo.remove_listing(listing.market_id)
-                    logger.info(f"市场上的腐败商品已被清除: Market ID {listing.market_id}")
-                    continue  # 继续处理下一个
-
-                # 检查2: 挂单是否超过5天
+                # 挂单超过5天自动下架
                 if listing.listed_at < five_days_ago:
                     try:
                         self._return_listing_to_seller(listing)
@@ -125,14 +92,12 @@ class MarketService:
             accessories = [item for item in listings if item.item_type == "accessory"]
             items = [item for item in listings if item.item_type == "item"]
             fish = [item for item in listings if item.item_type == "fish"]
-            commodities = [item for item in listings if item.item_type == "commodity"]
             return {
                 "success": True,
                 "rods": rods,
                 "accessories": accessories,
                 "items": items,
                 "fish": fish,
-                "commodities": commodities
             }
         except Exception as e:
             return {"success": False, "message": f"获取市场列表失败: {e}"}
@@ -223,26 +188,6 @@ class MarketService:
             "expires_at": None
         }
 
-    def _validate_commodity_listing(self, user_id: str, item_instance_id: int, quantity: int) -> Dict[str, Any]:
-        """验证大宗商品上架"""
-        user_commodity = self.exchange_repo.get_user_commodity_by_instance_id(item_instance_id)
-        if not user_commodity or user_commodity.user_id != user_id:
-            return {"success": False, "message": "大宗商品不存在或不属于你"}
-        if user_commodity.quantity < quantity:
-            return {"success": False, "message": f"数量不足，您只有 {user_commodity.quantity} 份"}
-        
-        commodity_template = self.exchange_repo.get_commodity_by_id(user_commodity.commodity_id)
-        item_template_id = user_commodity.commodity_id
-
-        return {
-            "success": True,
-            "item_template_id": item_template_id,
-            "item_name": commodity_template.name,
-            "item_description": commodity_template.description,
-            "item_refine_level": 1,
-            "expires_at": user_commodity.expires_at
-        }
-
     def _execute_listing_transaction(self, user_id: str, item_type: str, item_instance_id: int, quantity: int, quality_level: int) -> None:
         """执行上架事务 - 对于装备类物品，转移所有权到'MARKET'而不是删除"""
         if item_type == "rod":
@@ -255,15 +200,6 @@ class MarketService:
             self.inventory_repo.update_item_quantity(user_id, item_instance_id, -quantity)
         elif item_type == "fish":
             self.inventory_repo.update_fish_quantity(user_id, item_instance_id, -quantity, quality_level)
-        elif item_type == "commodity":
-            user_commodity = self.exchange_repo.get_user_commodity_by_instance_id(item_instance_id)
-            if not user_commodity or user_commodity.user_id != user_id:
-                raise ValueError("大宗商品不存在或不属于你")
-            remaining_quantity = user_commodity.quantity - quantity
-            if remaining_quantity > 0:
-                self.exchange_repo.update_user_commodity_quantity(item_instance_id, remaining_quantity)
-            else:
-                self.exchange_repo.delete_user_commodity(item_instance_id)
 
     def put_item_on_sale(self, user_id: str, item_type: str, item_instance_id: int, price: int, is_anonymous: bool = False, quantity: int = 1, quality_level: int = 0) -> Dict[str, Any]:
         """
@@ -271,7 +207,7 @@ class MarketService:
         
         Args:
             user_id: 用户ID
-            item_type: 物品类型 ("rod", "accessory", "item", "fish", "commodity")
+            item_type: 物品类型 ("rod", "accessory", "item", "fish")
             item_instance_id: 物品实例ID（对于道具、鱼类和商品，这是模板ID或实例ID）
             price: 单价
             is_anonymous: 是否匿名上架
@@ -303,7 +239,6 @@ class MarketService:
             "accessory": lambda: self._validate_accessory_listing(user_id, item_instance_id),
             "item": lambda: self._validate_item_listing(user_id, item_instance_id, quantity),
             "fish": lambda: self._validate_fish_listing(user_id, item_instance_id, quantity, quality_level),
-            "commodity": lambda: self._validate_commodity_listing(user_id, item_instance_id, quantity)
         }
 
         if item_type not in validation_methods:
@@ -352,7 +287,7 @@ class MarketService:
         根据实例ID查找市场ID
         
         Args:
-            item_type: 物品类型 ("rod", "accessory", "commodity")
+            item_type: 物品类型 ("rod", "accessory")
             instance_id: 实例ID
             
         Returns:
@@ -447,45 +382,7 @@ class MarketService:
             self.user_repo.update(seller)
 
             # 3. 将物品发给买家
-            if listing.item_type == "commodity":
-                # 检查买家是否有交易所账户
-                if not buyer.exchange_account_status:
-                    # 回滚交易
-                    buyer.coins += total_price
-                    seller.coins -= total_price
-                    self.user_repo.update(buyer)
-                    self.user_repo.update(seller)
-                    return {"success": False, "message": "您需要先开通交易所账户才能购买大宗商品"}
-
-                buyer_capacity = self._get_user_exchange_capacity(buyer)
-                buyer_current_quantity = self._get_user_total_commodity_quantity(buyer_id)
-                if buyer_current_quantity + listing.quantity > buyer_capacity:
-                    # 回滚交易
-                    buyer.coins += total_price
-                    seller.coins -= total_price
-                    self.user_repo.update(buyer)
-                    self.user_repo.update(seller)
-                    return {
-                        "success": False,
-                        "message": f"交易所仓库容量不足，当前持仓: {buyer_current_quantity}/{buyer_capacity}"
-                    }
-
-                # 如果没有腐败时间，使用默认值（兼容旧数据）
-                expires_at = listing.expires_at or datetime.now() + timedelta(days=3)
-
-                from ..domain.models import UserCommodity
-                new_commodity = UserCommodity(
-                    instance_id=0,
-                    user_id=buyer_id,
-                    commodity_id=listing.item_id,
-                    quantity=listing.quantity,
-                    purchase_price=listing.price, # Use market price as purchase price
-                    purchased_at=datetime.now(),
-                    expires_at=expires_at # 继承腐败时间
-                )
-                self.exchange_repo.add_user_commodity(new_commodity)
-
-            elif listing.item_type == "rod":
+            if listing.item_type == "rod":
                 # 直接转移鱼竿实例所有权给买家（保留所有属性包括耐久度）
                 self.inventory_repo.transfer_rod_instance_ownership(listing.item_instance_id, buyer_id)
             elif listing.item_type == "accessory":
@@ -542,26 +439,6 @@ class MarketService:
             self.inventory_repo.update_item_quantity(listing.user_id, listing.item_id, listing.quantity)
         elif listing.item_type == "fish":
             self.inventory_repo.add_fish_to_aquarium(listing.user_id, listing.item_id, listing.quantity, listing.quality_level)
-        elif listing.item_type == "commodity":
-            from ..domain.models import UserCommodity
-            # 检查卖家交易所容量
-            seller = self.user_repo.get_by_id(listing.user_id)
-            capacity = self._get_user_exchange_capacity(seller) if seller else int(self.config.get("exchange", {}).get("capacity", 1000))
-            user_commodities = self.exchange_repo.get_user_commodities(listing.user_id)
-            current_total_quantity = sum(item.quantity for item in user_commodities)
-            if current_total_quantity + listing.quantity > capacity:
-                raise Exception("卖家交易所容量不足，无法返还物品")
-            
-            new_commodity = UserCommodity(
-                instance_id=0,
-                user_id=listing.user_id,
-                commodity_id=listing.item_id,
-                quantity=listing.quantity,
-                purchase_price=0,  # 返还时买入价重置
-                purchased_at=datetime.now(),
-                expires_at=listing.expires_at or datetime.now() + timedelta(days=3)  # 如果没有腐败时间，默认3天
-            )
-            self.exchange_repo.add_user_commodity(new_commodity)
         else:
             raise ValueError(f"不支持的物品类型: {listing.item_type}")
 
@@ -662,7 +539,6 @@ class MarketService:
                 "accessory_count": len([i for i in all_listings if i.item_type == "accessory"]),
                 "item_count": sum(i.quantity for i in all_listings if i.item_type == "item"),
                 "fish_count": sum(i.quantity for i in all_listings if i.item_type == "fish"),
-                "commodity_count": sum(i.quantity for i in all_listings if i.item_type == "commodity")
             }
             
             return {

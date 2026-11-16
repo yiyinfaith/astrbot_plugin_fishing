@@ -266,11 +266,6 @@ html[data-theme="dark"] .badge.warn { color: #ffb74d; }
 .picker-item input { width: 16px; height: 16px; padding: 0; accent-color: var(--primary); }
 .picker-item .muted { margin-left: auto; font-size: 12px; }
 .picker-foot { padding: 6px 12px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
-.price-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
-.price-cards .metric p { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
-.trend-up { color: #2e7d32; }
-.trend-down { color: var(--error); }
-html[data-theme="dark"] .trend-up { color: #66bb6a; }
 .inline-input { width: 96px; height: 30px; padding: 4px 8px; }
 .note { padding: 12px 14px; border-radius: var(--radius); background: var(--hover); color: var(--muted); font-size: 13px; }
 .note strong { color: var(--text); font-weight: 500; }
@@ -283,7 +278,7 @@ html[data-theme="dark"] .trend-up { color: #66bb6a; }
 }
 
 @media (max-width: 900px) {
-  .three-col, .metrics.three, .price-cards { grid-template-columns: 1fr; }
+  .three-col, .metrics.three { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 620px) {

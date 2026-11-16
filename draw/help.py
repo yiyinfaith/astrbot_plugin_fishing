@@ -164,17 +164,6 @@ def draw_help_image():
         ("鱼类图鉴", "查看已解锁的\n鱼类图鉴"),
     ]
 
-    exchange = [
-        ("交易所", "查看市场状态\n和价格"),
-        ("交易所 开户", "开通交易所账户"),
-        ("交易所 升级", "升级交易所\n仓库容量"),
-        ("交易所 买入 [商品] [数量]", "购买大宗商品"),
-        ("交易所 卖出 [商品] [数量]", "卖出大宗商品"),
-        ("交易所 帮助", "查看交易所\n详细帮助"),
-        ("持仓", "查看我的\n库存详情"),
-        ("清仓", "卖出所有库存"),
-    ]
-
     def section_delta(item_count: int, cols: int) -> int:
         rows = math.ceil(item_count / cols) if item_count > 0 else 0
         # 与 draw_section 中的垂直占位保持一致：h//2+25 起始 + rows*(card_h+pad) + 35
@@ -189,7 +178,6 @@ def draw_help_image():
     y0_est += section_delta(len(market), 3)
     y0_est += section_delta(len(gacha), 3)
     y0_est += section_delta(len(social), 2)
-    y0_est += section_delta(len(exchange), 2)
     footer_y_est = y0_est + 20
     final_height = footer_y_est + 30
 
@@ -227,7 +215,6 @@ def draw_help_image():
     y0 = draw_section("🛒 商店与市场", market, y0, cols=3)
     y0 = draw_section("🎰 抽卡", gacha, y0, cols=3)
     y0 = draw_section("👥 社交功能", social, y0, cols=2)
-    y0 = draw_section("📈 大宗商品交易所", exchange, y0, cols=2)
 
     # 添加底部信息
     footer_y = y0 + 20

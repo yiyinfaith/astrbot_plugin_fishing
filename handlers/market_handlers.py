@@ -555,7 +555,6 @@ async def market(plugin: "FishingPlugin", event: AstrMessageEvent):
     grouped_items = {
         "rod": result.get("rods", []),
         "accessory": result.get("accessories", []),
-        "commodity": result.get("commodities", []),
         "item": result.get("items", []),
         "fish": result.get("fish", []),
     }
@@ -598,26 +597,6 @@ async def market(plugin: "FishingPlugin", event: AstrMessageEvent):
             msg += f" - {item.item_name}{quality_str}{refine_level_str}{quantity_text} (ID: {display_code}) - {price_text}\n"
             msg += f" - 售卖人： {seller_display}"
 
-            # 为大宗商品添加腐败时间显示
-            if (
-                item.item_type == "commodity"
-                and hasattr(item, "expires_at")
-                and item.expires_at
-            ):
-                from datetime import datetime
-
-                time_left = item.expires_at - datetime.now()
-                if time_left.total_seconds() <= 0:
-                    msg += f"\n - 状态: 💀 已腐败"
-                elif time_left.total_seconds() <= 86400:  # 24小时内
-                    hours = int(time_left.total_seconds() // 3600)
-                    minutes = int((time_left.total_seconds() % 3600) // 60)
-                    msg += f"\n - 腐败倒计时: ⚠️ {hours}小时{minutes}分钟"
-                else:
-                    days = time_left.days
-                    hours = int(time_left.seconds // 3600)
-                    msg += f"\n - 腐败倒计时: ⏰ {days}天{hours}小时"
-
             msg += "\n\n"
         return msg
 
@@ -625,9 +604,6 @@ async def market(plugin: "FishingPlugin", event: AstrMessageEvent):
     final_message_parts = []
     final_message_parts.append(format_section("🎣", "鱼竿", grouped_items["rod"]))
     final_message_parts.append(format_section("💍", "饰品", grouped_items["accessory"]))
-    final_message_parts.append(
-        format_section("📦", "大宗商品", grouped_items["commodity"])
-    )
     final_message_parts.append(format_section("🎁", "道具", grouped_items["item"]))
     final_message_parts.append(format_section("🐟", "鱼类", grouped_items["fish"]))
 
@@ -668,7 +644,6 @@ async def list_any(
     - Axxxx: 飾品實例
     - Dxxxx: 道具模板
     - Fxxxx: 魚類模板
-    - Cxxxx: 大宗商品實例
     """
     user_id = plugin._get_effective_user_id(event)
     args = event.message_str.split(" ")
@@ -723,7 +698,7 @@ async def list_any(
     # 检查是否为数字ID（旧格式）
     if token.isdigit():
         yield event.plain_result(
-            "❌ 请使用正确的物品ID！\n\n📝 短码格式：\n• R开头：鱼竿（如 R2N9C）\n• A开头：饰品（如 A7K3Q）\n• D开头：道具（如 D1）\n• F开头：鱼类（如 F3）\n• C开头：大宗商品（如 C1234）\n\n💡 提示：使用 /背包 查看您的物品短码"
+            "❌ 请使用正确的物品ID！\n\n📝 短码格式：\n• R开头：鱼竿（如 R2N9C）\n• A开头：饰品（如 A7K3Q）\n• D开头：道具（如 D1）\n• F开头：鱼类（如 F3）\n\n💡 提示：使用 /背包 查看您的物品短码"
         )
         return
 
@@ -796,22 +771,8 @@ async def list_any(
             quantity=quantity,
             quality_level=quality_level,
         )
-    elif token.startswith("C"):
-        try:
-            instance_id = _from_base36(token[1:])
-        except Exception:
-            yield event.plain_result("❌ 无效的大宗商品ID，请检查后重试。")
-            return
-        result = plugin.market_service.put_item_on_sale(
-            user_id,
-            "commodity",
-            instance_id,
-            price,
-            is_anonymous=is_anonymous,
-            quantity=quantity,
-        )
     else:
-        yield event.plain_result("❌ 无效ID，请使用以 R/A/D/F/C 开头的短码")
+        yield event.plain_result("❌ 无效ID，请使用以 R/A/D/F 开头的短码")
         return
 
     if result:
@@ -956,8 +917,6 @@ def _get_display_code_for_market_item(item) -> str:
         # 道具和鱼类在市场中使用Base36编码的市场ID
         # 品质信息通过物品名称的"✨高品质"标识来展示，ID保持统一格式
         return f"M{_to_base36(item.market_id)}"
-    elif item_type == "commodity" and item_instance_id:
-        return f"C{_to_base36(item_instance_id)}"
     else:
         # 其他情况，使用Base36编码的市场ID
         return f"M{_to_base36(item.market_id)}"
@@ -1021,23 +980,7 @@ def _parse_market_code(code: str, market_service=None) -> int:
                 raise ValueError("无法解析饰品ID，请稍后重试")
         except ValueError as e:
             raise ValueError(f"无效的饰品ID: {code}")
-    elif code.startswith("C") and len(code) > 1:
-        # C开头的ID，需要根据实例ID查找市场ID
-        try:
-            instance_id = _from_base36(code[1:])
-            if market_service:
-                market_id = market_service.get_market_id_by_instance_id(
-                    "commodity", instance_id
-                )
-                if market_id is not None:
-                    return market_id
-                else:
-                    raise ValueError(f"未找到大宗商品ID {code} 对应的市场商品")
-            else:
-                raise ValueError("无法解析大宗商品ID，请稍后重试")
-        except ValueError as e:
-            raise ValueError(f"无效的大宗商品ID: {code}")
     else:
         raise ValueError(
-            f"无效的市场ID: {code}，请使用短码（如 R1A2B、A3C4D、MC、C5E6F）"
+            f"无效的市场ID: {code}，请使用短码（如 R1A2B、A3C4D、MC）"
         )

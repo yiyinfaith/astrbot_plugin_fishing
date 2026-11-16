@@ -91,12 +91,6 @@ class SqliteUserRepository(AbstractUserRepository):
             last_login_time=parse_datetime(row["last_login_time"]),
             last_stolen_at=parse_datetime(row["last_stolen_at"]),
             fishing_zone_id=row["fishing_zone_id"],
-
-
-            
-            # --- [新功能] 添加交易所账户状态字段的读取 ---
-            exchange_account_status=bool(row["exchange_account_status"]) if "exchange_account_status" in row_keys else False,
-            exchange_capacity_level=row["exchange_capacity_level"] if "exchange_capacity_level" in row_keys else 0,
         )
 
     def get_by_id(self, user_id: str) -> Optional[User]:

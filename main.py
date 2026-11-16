@@ -16,7 +16,6 @@ from .core.repositories.sqlite_shop_repo import SqliteShopRepository
 from .core.repositories.sqlite_log_repo import SqliteLogRepository
 from .core.repositories.sqlite_achievement_repo import SqliteAchievementRepository
 from .core.repositories.sqlite_user_buff_repo import SqliteUserBuffRepository
-from .core.repositories.sqlite_exchange_repo import SqliteExchangeRepository
 
 from .core.services.data_setup_service import DataSetupService
 from .core.services.item_template_service import ItemTemplateService
@@ -30,7 +29,6 @@ from .core.services.achievement_service import AchievementService
 from .core.services.game_mechanics_service import GameMechanicsService
 from .core.services.effect_manager import EffectManager
 from .core.services.fishing_zone_service import FishingZoneService
-from .core.services.exchange_service import ExchangeService
 from .core.services.fish_weight_service import FishWeightService
 
 from .core.database.migration import run_migrations
@@ -47,7 +45,6 @@ from .handlers import (
     aquarium_handlers,
 )
 from .handlers.fishing_handlers import FishingHandlers
-from .handlers.exchange_handlers import ExchangeHandlers
 from .webui import FishingAdminAPI
 
 PLUGIN_NAME = "astrbot_plugin_fishing"
@@ -87,27 +84,6 @@ class FishingPlugin(Star):
         user_config = config.get("user", {})
         market_config = config.get("market", {})
         sell_prices_config = config.get("sell_prices", {})
-        
-        # 直接从框架获取 exchange 配置（不重建）
-        exchange_config = config.get("exchange", {})
-        if not exchange_config:
-            # 如果框架返回空字典，说明嵌套配置不被支持，手动构建默认值
-            logger.warning("[CONFIG] Exchange config is empty, using defaults")
-            exchange_config = {
-                "account_fee": 100000,
-                "capacity": 1000,
-                "tax_rate": 0.05,
-                "volatility": {"dried_fish": 0.08, "fish_roe": 0.12, "fish_oil": 0.10},
-                "event_chance": 0.1,
-                "max_change_rate": 0.2,
-                "min_price": 1,
-                "max_price": 1000000,
-                "sentiment_weights": {"panic": 0.1, "pessimistic": 0.2, "neutral": 0.4, "optimistic": 0.2, "euphoric": 0.1},
-                "merge_window_minutes": 30,
-                "initial_prices": {"dried_fish": 6000, "fish_roe": 12000, "fish_oil": 10000}
-            }
-        else:
-            logger.info(f"[CONFIG] Exchange capacity loaded: {exchange_config.get('capacity', 'NOT SET')}")
         
         self.game_config = {
             "fishing": {
@@ -168,7 +144,6 @@ class FishingPlugin(Star):
                     "6": 25.0, "7": 55.0, "8": 125.0, "9": 280.0, "10": 660.0
                 }
             },
-            "exchange": exchange_config,  # 直接使用框架的配置
         }
         
         # 初始化数据库模式
@@ -186,7 +161,6 @@ class FishingPlugin(Star):
         self.log_repo = SqliteLogRepository(db_path)
         self.achievement_repo = SqliteAchievementRepository(db_path)
         self.buff_repo = SqliteUserBuffRepository(db_path)
-        self.exchange_repo = SqliteExchangeRepository(db_path)
 
         # --- 3. 组合根：实例化所有服务层，并注入依赖 ---
         # 3.1 核心服务必须在效果管理器之前实例化，以解决依赖问题
@@ -208,9 +182,8 @@ class FishingPlugin(Star):
             self.game_config,
         )
         self.shop_service = ShopService(self.item_template_repo, self.inventory_repo, self.user_repo, self.shop_repo, self.game_config)
-        # MarketService 依赖 exchange_repo
         self.market_service = MarketService(self.market_repo, self.inventory_repo, self.user_repo, self.log_repo,
-                                           self.item_template_repo, self.exchange_repo, self.game_config)
+                                           self.item_template_repo, self.game_config)
         self.achievement_service = AchievementService(self.achievement_repo, self.user_repo, self.inventory_repo,
                                                      self.item_template_repo, self.log_repo)
         self.fish_weight_service = FishWeightService()
@@ -232,12 +205,6 @@ class FishingPlugin(Star):
             self.user_repo,
             self.item_template_repo
         )
-        
-        # 初始化交易所服务
-        self.exchange_service = ExchangeService(self.user_repo, self.exchange_repo, self.game_config, self.log_repo, self.market_service)
-        
-        # 初始化交易所处理器
-        self.exchange_handlers = ExchangeHandlers(self)
         
         #初始化钓鱼处理器
         self.fishing_handlers = FishingHandlers(self)
@@ -265,7 +232,6 @@ class FishingPlugin(Star):
         # --- 4. 启动后台任务 ---
         self.fishing_service.start_auto_fishing_task()
         self.achievement_service.start_achievement_check_task()
-        self.exchange_service.start_daily_price_update_task() # 启动交易所后台任务
 
         # --- 5. 初始化核心游戏数据 ---
         data_setup_service = DataSetupService(
@@ -657,38 +623,11 @@ class FishingPlugin(Star):
         async for r in social_handlers.view_achievements(self, event):
             yield r
 
-    # =========== 交易所 ==========
-
-    @filter.command("交易所")
-    async def exchange_main(self, event: AstrMessageEvent):
-        """查看交易所信息和进行交易。用法：交易所 [买入/卖出] [商品] [数量]"""
-        async for r in self.exchange_handlers.exchange_main(event):
-            yield r
-
-    @filter.command("持仓")
-    async def view_inventory(self, event: AstrMessageEvent):
-        """查看你在交易所的持仓情况"""
-        async for r in self.exchange_handlers.view_inventory(event):
-            yield r
-
-    @filter.command("交易所升级", alias={"升级交易所", "交易所扩容"})
-    async def upgrade_exchange_capacity(self, event: AstrMessageEvent):
-        """升级交易所仓库容量"""
-        async for r in self.exchange_handlers.upgrade_capacity(event):
-            yield r
-
-    @filter.command("清仓")
-    async def clear_inventory(self, event: AstrMessageEvent):
-        """清空交易所持仓，将所有商品按当前价格卖出"""
-        async for r in self.exchange_handlers.clear_inventory(event):
-            yield r
-
     async def terminate(self):
         """插件被卸载/停用时调用"""
         logger.info("钓鱼插件正在终止...")
         self.fishing_service.stop_auto_fishing_task()
         self.achievement_service.stop_achievement_check_task()
-        self.exchange_service.stop_daily_price_update_task() # 终止交易所后台任务
         
         for repo in (self.user_repo, self.inventory_repo):
             repo.close_connection()

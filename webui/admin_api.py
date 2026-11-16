@@ -34,7 +34,6 @@ ITEM_TYPE_LABELS = {
     "coins": "金币",
     "premium": "高级货币",
     "titles": "称号",
-    "commodity": "大宗商品",
 }
 
 # 物品模板的字段定义：后端用它校验和转换，前端用它渲染表格与表单。
@@ -393,13 +392,10 @@ class FishingAdminAPI:
             ("shops/items", "GET", self.shop_items, "商店商品"),
             ("shops/items/save", "POST", self.shop_item_save, "保存商店商品"),
             ("shops/items/delete", "POST", self.shop_item_delete, "删除商店商品"),
-            # 市场与交易所
+            # 玩家市场
             ("market", "GET", self.market_list, "玩家市场"),
             ("market/price", "POST", self.market_price, "修改挂单价格"),
             ("market/remove", "POST", self.market_remove, "下架挂单"),
-            ("exchange", "GET", self.exchange_status, "交易所"),
-            ("exchange/update", "POST", self.exchange_update, "刷新交易所价格"),
-            ("exchange/reset", "POST", self.exchange_reset, "重置交易所价格"),
         ]
 
     def register(self, context: Any, plugin_name: str) -> None:
@@ -1259,12 +1255,12 @@ class FishingAdminAPI:
         return {"message": f"商品 #{item_id} 已删除"}
 
     # ------------------------------------------------------------------
-    # 市场与交易所
+    # 玩家市场
     # ------------------------------------------------------------------
 
     def market_list(self, query, body):
         item_type = query.get("item_type") or None
-        if item_type and item_type not in ("fish", "rod", "accessory", "item", "commodity"):
+        if item_type and item_type not in ("fish", "rod", "accessory", "item"):
             raise ApiError("物品类型无效")
         min_price = _int(query.get("min_price"), "最低价格", optional=True, minimum=0)
         max_price = _int(query.get("max_price"), "最高价格", optional=True, minimum=0)
@@ -1286,19 +1282,3 @@ class FishingAdminAPI:
     def market_remove(self, query, body):
         market_id = _int(body.get("market_id"), "挂单 ID", minimum=1)
         return _check(self.p.market_service.remove_market_item_by_admin(market_id))
-
-    def exchange_status(self, query, body):
-        service = self.p.exchange_service
-        return {
-            "status": service.get_market_status(),
-            "history": service.get_price_history(days=7),
-            "holdings": service.get_user_commodity_stats(),
-        }
-
-    def exchange_update(self, query, body):
-        _check(self.p.exchange_service.manual_update_prices(), "价格更新失败")
-        return {"message": "交易所价格已刷新"}
-
-    def exchange_reset(self, query, body):
-        _check(self.p.exchange_service.reset_prices_to_initial(), "价格重置失败")
-        return {"message": "交易所价格已重置为初始值"}

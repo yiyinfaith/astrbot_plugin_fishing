@@ -1,6 +1,6 @@
 name: astrbot_plugin_fishing
 display_name: 全能钓鱼
-desc: 钓鱼、鱼塘、水族箱、商店、玩家市场、抽卡与交易所的钓鱼养成玩法，管理功能内嵌在 AstrBot 面板中。
+desc: 钓鱼、鱼塘、水族箱、商店、玩家市场与抽卡的钓鱼养成玩法，管理功能内嵌在 AstrBot 面板中。
 short_desc: 钓鱼养成与经济玩法，管理功能内嵌 AstrBot 面板。
 version: 1.0.0
 author: "一吟Faith"

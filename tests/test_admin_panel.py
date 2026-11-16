@@ -24,6 +24,7 @@ REMOVED_COMMANDS = [
     "骰宝状态", "骰宝帮助", "21点", "21点加入", "抽牌", "停牌", "拉杆", "连转", "奖池", "读博记录",
     "发红包", "领红包", "红包列表", "撤回红包", "系统借款", "确认借款", "借条", "一键还债", "还系统",
     "钓鱼银行", "钓鱼存款", "钓鱼取款", "钓鱼还税", "还税", "税收记录",
+    "交易所", "持仓", "交易所升级", "升级交易所", "交易所扩容", "清仓",
 ]
 
 
@@ -45,7 +46,7 @@ class CommandSurfaceTests(unittest.TestCase):
             self.assertNotIn(command, names | aliases, command)
         self.assertNotIn("filter.regex", MAIN_SOURCE)
         # 保留的核心玩法仍在
-        for command in ("钓鱼", "鱼塘", "商店", "市场", "抽卡", "交易所", "偷鱼", "排行榜", "转账"):
+        for command in ("钓鱼", "鱼塘", "商店", "商店购买", "市场", "上架", "购买", "下架", "出售", "抽卡", "偷鱼", "排行榜", "转账"):
             self.assertIn(command, names)
 
     def test_removed_modules_are_gone(self):
@@ -56,12 +57,14 @@ class CommandSurfaceTests(unittest.TestCase):
             "core/services/loan_service.py", "core/services/red_packet_service.py", "manager/server.py",
             "handlers/bank_handlers.py", "core/services/bank_service.py", "core/repositories/sqlite_bank_repo.py",
             "core/repositories/bank_sql.py", "core/domain/bank_models.py",
+            "handlers/exchange_handlers.py", "core/services/exchange_service.py",
+            "core/repositories/sqlite_exchange_repo.py",
         ):
             self.assertFalse((PLUGIN_DIR / path).exists(), path)
 
     def test_schema_has_no_removed_config(self):
         schema = json.loads((PLUGIN_DIR / "_conf_schema.json").read_text(encoding="utf-8-sig"))
-        for key in ("webui", "sicbo", "blackjack", "slot", "loan", "tax", "bank"):
+        for key in ("webui", "sicbo", "blackjack", "slot", "loan", "tax", "bank", "exchange"):
             self.assertNotIn(key, schema)
         self.assertEqual(schema["user"]["items"]["transfer_fee_rate"]["default"], 0.05)
         self.assertNotIn("wipe_bomb_attempts", schema["game"]["items"])
@@ -195,7 +198,14 @@ class AdminApiTests(unittest.TestCase):
         self.assertEqual(self.plugin.user_repo.get_by_id("1001").coins, 895)
         self.assertEqual(self.plugin.user_repo.get_by_id("1002").coins, before + 100)
         routes = {r[0] for r in self.api.routes()}
-        self.assertFalse({"bank", "tax", "tax/save"} & routes)
+        self.assertFalse({"bank", "tax", "tax/save", "exchange", "exchange/update"} & routes)
+
+    def test_market_rejects_commodity_listings(self):
+        self.assertFalse(hasattr(self.plugin, "exchange_service"))
+        result = self.plugin.market_service.put_item_on_sale("1001", "commodity", 1, 100)
+        self.assertFalse(result["success"])
+        with self.assertRaises(self.ApiError):
+            self.call(self.api.market_list, query={"item_type": "commodity"})
 
     def test_impersonation_maps_sender_to_player(self):
         self.call(self.api.impersonation_start, body={"admin_id": "9", "target_id": "1002"})
@@ -210,7 +220,7 @@ class AdminApiTests(unittest.TestCase):
 
     def test_every_read_endpoint_serializes(self):
         for name, query in (
-            ("overview", {}), ("users", {}), ("market", {}), ("exchange", {}),
+            ("overview", {}), ("users", {}), ("market", {}),
             ("shops", {}), ("gacha", {}), ("zones", {}), ("titles", {}), ("meta", {}),
             ("templates", {"kind": "rods"}), ("users/inventory", {"user_id": "1001"}), ("users/detail", {"user_id": "1001"}),
         ):
@@ -272,6 +282,36 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(cur.execute("SELECT SUM(balance) + SUM(locked_balance) FROM bank_accounts").fetchone()[0], 0)
         self.assertEqual(cur.execute("SELECT COUNT(*) FROM bank_fixed_deposits WHERE status = 'active'").fetchone()[0], 0)
         self.assertEqual(cur.execute("SELECT status FROM bank_withdraw_reservations").fetchone()[0], "cancelled")
+
+    def test_051_refunds_exchange_holdings(self):
+        import importlib.util
+        path = PLUGIN_DIR / "core" / "database" / "migrations" / "051_refund_exchange_holdings.py"
+        spec = importlib.util.spec_from_file_location("m051", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        conn = sqlite3.connect(":memory:")
+        cur = conn.cursor()
+        cur.executescript("""
+            CREATE TABLE users (user_id TEXT PRIMARY KEY, coins INTEGER, max_coins INTEGER);
+            CREATE TABLE exchange_prices (price_id INTEGER PRIMARY KEY, date TEXT, time TEXT, commodity_id TEXT, price INTEGER);
+            CREATE TABLE user_commodities (instance_id INTEGER PRIMARY KEY, user_id TEXT, commodity_id TEXT, quantity INTEGER,
+                purchase_price INTEGER, purchased_at TEXT, expires_at TEXT);
+            CREATE TABLE market (market_id INTEGER PRIMARY KEY, user_id TEXT, item_type TEXT, item_id, quantity INTEGER,
+                price INTEGER, expires_at DATETIME);
+            INSERT INTO users VALUES ('a', 0, 0), ('b', 10, 10);
+            INSERT INTO exchange_prices VALUES (1, '2026-11-01', '09:00:00', 'dried_fish', 5000),
+                (2, '2026-11-02', '09:00:00', 'dried_fish', 6000);
+            INSERT INTO user_commodities VALUES (1, 'a', 'dried_fish', 2, 1000, '2026-11-01', '2999-01-01T00:00:00'),
+                (2, 'a', 'dried_fish', 5, 1000, '2026-11-01', '2000-01-01T00:00:00'),
+                (3, 'b', 'fish_oil', 3, 700, '2026-11-01', '2999-01-01T00:00:00');
+            INSERT INTO market VALUES (1, 'b', 'commodity', 'dried_fish', 1, 99999, '2999-01-01 00:00:00'),
+                (2, 'b', 'item', 3, 1, 50, NULL);
+        """)
+        module.up(cur)
+        coins = dict(cur.execute("SELECT user_id, coins FROM users"))
+        self.assertEqual(coins, {"a": 12000, "b": 10 + 2100 + 6000})
+        self.assertEqual(cur.execute("SELECT COUNT(*) FROM user_commodities").fetchone()[0], 0)
+        self.assertEqual([r[0] for r in cur.execute("SELECT item_type FROM market")], ["item"])
 
 
 if __name__ == "__main__":

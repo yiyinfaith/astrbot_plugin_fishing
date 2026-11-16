@@ -61,7 +61,6 @@ class FishingHandlers:
         self.item_template_repo = plugin.item_template_repo
         self.achievement_service = plugin.achievement_service
         self.aquarium_service = plugin.aquarium_service
-        self.exchange_service = plugin.exchange_service
 
     def _get_fishing_cost(self, user):
         zone = self.plugin.inventory_repo.get_zone_by_id(user.fishing_zone_id)

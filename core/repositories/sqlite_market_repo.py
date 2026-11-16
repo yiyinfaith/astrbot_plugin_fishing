@@ -115,7 +115,6 @@ class SqliteMarketRepository(AbstractMarketRepository):
                         WHEN m.item_type = 'accessory' THEN a.name
                         WHEN m.item_type = 'item' THEN i.name
                         WHEN m.item_type = 'fish' THEN f.name
-                        WHEN m.item_type = 'commodity' THEN c.name
                         ELSE '未知物品'
                     END AS item_name,
                     CASE
@@ -123,7 +122,6 @@ class SqliteMarketRepository(AbstractMarketRepository):
                         WHEN m.item_type = 'accessory' THEN a.description
                         WHEN m.item_type = 'item' THEN i.description
                         WHEN m.item_type = 'fish' THEN f.description
-                        WHEN m.item_type = 'commodity' THEN c.description
                         ELSE ''
                     END AS item_description,
                     m.expires_at
@@ -133,7 +131,6 @@ class SqliteMarketRepository(AbstractMarketRepository):
                 LEFT JOIN accessories a ON m.item_type = 'accessory' AND m.item_id = a.accessory_id
                 LEFT JOIN items i ON m.item_type = 'item' AND m.item_id = i.item_id
                 LEFT JOIN fish f ON m.item_type = 'fish' AND m.item_id = f.fish_id
-                LEFT JOIN commodities c ON m.item_type = 'commodity' AND m.item_id = c.commodity_id
                 WHERE m.market_id = ?
             """
             
@@ -183,12 +180,11 @@ class SqliteMarketRepository(AbstractMarketRepository):
                     (m.item_type = 'accessory' AND a.name LIKE ?) OR
                     (m.item_type = 'item' AND i.name LIKE ?) OR
                     (m.item_type = 'fish' AND f.name LIKE ?) OR
-                    (m.item_type = 'commodity' AND c.name LIKE ?) OR
                     u.nickname LIKE ?
                 )"""
                 where_conditions.append(search_condition)
                 search_param = f"%{search}%"
-                params.extend([search_param, search_param, search_param, search_param, search_param, search_param])
+                params.extend([search_param, search_param, search_param, search_param, search_param])
             
             where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
             
@@ -201,7 +197,6 @@ class SqliteMarketRepository(AbstractMarketRepository):
                 LEFT JOIN accessories a ON m.item_type = 'accessory' AND m.item_id = a.accessory_id
                 LEFT JOIN items i ON m.item_type = 'item' AND m.item_id = i.item_id
                 LEFT JOIN fish f ON m.item_type = 'fish' AND m.item_id = f.fish_id
-                LEFT JOIN commodities c ON m.item_type = 'commodity' AND m.item_id = c.commodity_id
                 WHERE {where_clause}
             """
             cursor.execute(count_query, params)
@@ -227,7 +222,6 @@ class SqliteMarketRepository(AbstractMarketRepository):
                         WHEN m.item_type = 'accessory' THEN a.name
                         WHEN m.item_type = 'item' THEN i.name
                         WHEN m.item_type = 'fish' THEN f.name
-                        WHEN m.item_type = 'commodity' THEN c.name
                         ELSE '未知物品'
                     END AS item_name,
                     CASE
@@ -235,7 +229,6 @@ class SqliteMarketRepository(AbstractMarketRepository):
                         WHEN m.item_type = 'accessory' THEN a.description
                         WHEN m.item_type = 'item' THEN i.description
                         WHEN m.item_type = 'fish' THEN f.description
-                        WHEN m.item_type = 'commodity' THEN c.description
                         ELSE ''
                     END AS item_description,
                     m.expires_at
@@ -245,7 +238,6 @@ class SqliteMarketRepository(AbstractMarketRepository):
                 LEFT JOIN accessories a ON m.item_type = 'accessory' AND m.item_id = a.accessory_id
                 LEFT JOIN items i ON m.item_type = 'item' AND m.item_id = i.item_id
                 LEFT JOIN fish f ON m.item_type = 'fish' AND m.item_id = f.fish_id
-                LEFT JOIN commodities c ON m.item_type = 'commodity' AND m.item_id = c.commodity_id
                 WHERE {where_clause}
                 ORDER BY m.listed_at DESC
             """
