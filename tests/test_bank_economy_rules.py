@@ -4,7 +4,6 @@
 - 欠税必须能被清偿，且清偿顺序是先旧账后新账；
 - 预约锁定的资金不能既取不出又扣不到税，超时必须能释放；
 - asset_scope / deduct_scope 三档口径各自的统计与扣款范围准确；
-- 借贷催收能穿透银行（可通过 loan.collect_from_fixed 关闭）；
 - 大额取款门槛按单笔判定，与 PR #17 的原始设计一致。
 """
 
@@ -419,79 +418,6 @@ class TaxScopeTests(BankEconomyTestCase):
         self.assertEqual(result["tax_paid"], 5_000)
         self.assertEqual(helpers.wallet_of(self.db_path), 0)
         self.assertEqual(helpers.bank_of(self.db_path)["balance"], 8_000)
-
-
-class LoanCollectionTests(BankEconomyTestCase):
-    def _collect(self, amount, allow_fixed=True):
-        conn = sqlite3.connect(self.db_path)
-        try:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            collected = self.bank_sql.collect_for_loan(
-                cursor, "u1", amount, allow_fixed=allow_fixed
-            )
-            conn.commit()
-            return collected
-        finally:
-            conn.close()
-
-    def test_collection_reaches_bank_balance(self):
-        """只扣钱包的话，借款人存进银行就能让催收颗粒无收。"""
-        helpers.set_wallet(self.db_path, coins=0)
-        helpers.set_bank_state(self.db_path, balance=800_000, reset_date=TODAY)
-
-        collected = self._collect(500_000)
-
-        self.assertEqual(collected, 500_000)
-        self.assertEqual(helpers.bank_of(self.db_path)["balance"], 300_000)
-
-    def test_collection_drains_wallet_before_bank(self):
-        helpers.set_wallet(self.db_path, coins=200_000)
-        helpers.set_bank_state(self.db_path, balance=800_000, reset_date=TODAY)
-
-        collected = self._collect(500_000)
-
-        self.assertEqual(collected, 500_000)
-        self.assertEqual(helpers.wallet_of(self.db_path), 0)
-        self.assertEqual(helpers.bank_of(self.db_path)["balance"], 500_000)
-
-    def test_collection_can_break_fixed_deposits(self):
-        helpers.set_wallet(self.db_path, coins=0)
-        helpers.set_bank_state(self.db_path, balance=0, reset_date=TODAY)
-        self._insert_fixed(principal=1_000_000)
-
-        collected = self._collect(600_000)
-
-        self.assertEqual(collected, 600_000)
-        row = helpers.query_one(
-            self.db_path, "SELECT status FROM bank_fixed_deposits WHERE user_id = 'u1'"
-        )
-        self.assertEqual(row["status"], "cancelled")
-        # 解约本金先入活期，扣走欠款后余下的留在活期
-        self.assertEqual(helpers.bank_of(self.db_path)["balance"], 400_000)
-
-    def test_collection_skips_fixed_when_disabled(self):
-        helpers.set_wallet(self.db_path, coins=0)
-        helpers.set_bank_state(self.db_path, balance=0, reset_date=TODAY)
-        self._insert_fixed(principal=1_000_000)
-
-        collected = self._collect(600_000, allow_fixed=False)
-
-        self.assertEqual(collected, 0)
-        row = helpers.query_one(
-            self.db_path, "SELECT status FROM bank_fixed_deposits WHERE user_id = 'u1'"
-        )
-        self.assertEqual(row["status"], "active")
-
-    def test_collection_never_touches_locked_funds(self):
-        """预约锁定的钱是已经承诺给玩家的取款额，催收不能直接抢走。"""
-        helpers.set_wallet(self.db_path, coins=0)
-        helpers.set_bank_state(self.db_path, balance=1_000_000, locked=800_000, reset_date=TODAY)
-
-        collected = self._collect(1_000_000)
-
-        self.assertEqual(collected, 200_000)
-        self.assertEqual(helpers.bank_of(self.db_path)["balance"], 800_000)
 
 
 class LedgerTests(BankEconomyTestCase):

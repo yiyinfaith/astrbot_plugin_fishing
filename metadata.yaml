@@ -1,6 +1,18 @@
-﻿name: astrbot_plugin_fishing_again
-display_name: Fishing Another!
-version: 2.6.5
-author: "Akiyo-dayo"
-description: "forked from 0xNMLSS/astrbot_plugin_fishing，原作因工作原因停止维护，我尝试接手后续开发，兼容原存档。能力微弱也许存在大量Bug请提Issues，至于功能大概是想到什么加什么也许会逐渐偏离钓鱼走向综合（感谢前辈们编写的钓鱼系统）"
-repo: https://github.com/Akiyo-dayo/astrbot_plugin_fishing
+name: astrbot_plugin_fishing
+display_name: 全能钓鱼
+desc: 钓鱼、鱼塘、水族箱、商店、玩家市场、抽卡、银行与交易所的钓鱼养成玩法，管理功能内嵌在 AstrBot 面板中。
+short_desc: 钓鱼养成与经济玩法，管理功能内嵌 AstrBot 面板。
+version: 1.0.0
+author: "一吟Faith"
+logo: logo.png
+category: 娱乐
+repo: https://github.com/yiyinfaith/astrbot_plugin_fishing
+astrbot_version: ">=4.29.0,<5"
+support_platforms:
+  - aiocqhttp
+  - telegram
+  - discord
+  - lark
+  - dingtalk
+help: |
+  发送「钓鱼帮助」查看全部指令；管理功能在 AstrBot 面板的插件详情页「钓鱼管理」中。

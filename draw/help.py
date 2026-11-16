@@ -35,26 +35,6 @@ def draw_help_image():
         bbox = _measure_draw.textbbox((0, 0), text, font=font)
         return bbox[2] - bbox[0], bbox[3] - bbox[1]
 
-    # 5. 处理logo背景色的函数
-    def replace_white_background(img, new_bg_color=bg_top, threshold=240):
-        """将图片的白色背景替换为指定颜色"""
-        img = img.convert("RGBA")
-        data = img.getdata()
-        new_data = []
-
-        for item in data:
-            r, g, b = item[:3]
-            alpha = item[3] if len(item) > 3 else 255
-
-            # 如果像素接近白色，就替换为新背景色
-            if r >= threshold and g >= threshold and b >= threshold:
-                new_data.append((*new_bg_color, alpha))
-            else:
-                new_data.append(item)
-
-        img.putdata(new_data)
-        return img
-
     # 6. Logo/标题布局（先定义数值，稍后绘制）
     logo_size = 160
     logo_x = 30
@@ -183,58 +163,6 @@ def draw_help_image():
         ("十连 [卡池ID]", "进行十连抽卡"),
         ("查看卡池 [ID]", "查看卡池详情"),
         ("抽卡记录", "查看我的\n抽卡记录"),
-        ("擦弹 [金额]", "进行擦弹游戏\n(可填allin/halfin)"),
-        ("擦弹记录", "查看我的\n擦弹记录"),
-        ("命运之轮 [金额]", "挑战命运之轮\n连续10层"),
-        ("继续", "在命运之轮中\n继续下一层"),
-        ("放弃", "在命运之轮中\n放弃并结算"),
-    ]
-
-    sicbo = [
-        ("开庄", "系统开启骰宝游戏\n倒计时60秒"),
-        ("玩家开庄", "玩家当庄家\n用自己金币赔付"),
-        ("鸭大 [金额]", "鸭大(11-17点)\n赔率1:1"),
-        ("鸭小 [金额]", "鸭小(4-10点)\n赔率1:1"),
-        ("鸭单 [金额]", "鸭单数\n赔率1:1"),
-        ("鸭双 [金额]", "鸭双数\n赔率1:1"),
-        ("鸭豹子 [金额]", "鸭三同\n赔率1:24"),
-        ("鸭一点 [金额]", "鸭骰子出现1\n动态赔率"),
-        ("鸭4点 [金额]", "鸭总点数4\n赔率1:50"),
-        ("鸭17点 [金额]", "鸭总点数17\n赔率1:50"),
-        ("骰宝状态", "查看游戏状态"),
-        ("我的下注", "查看下注情况"),
-        ("骰宝记录", "查看最近5期\n开奖记录"),
-        ("骰宝帮助", "查看详细规则"),
-        ("骰宝赔率", "查看完整\n赔率表"),
-        ("骰宝结算", "管理员强制\n结算当前游戏"),
-        ("骰宝倒计时 [秒数]", "管理员设置\n游戏倒计时(10-300秒)"),
-        ("骰宝模式 [模式]", "管理员设置\n消息模式(image/text)"),
-    ]
-
-    blackjack = [
-        ("21点 [金额]", "开局（系统庄家）\n下注后开始"),
-        ("21点开庄", "玩家当庄家\n其他人可加入"),
-        ("21点加入 [金额]", "加入别人开的场"),
-        ("抽牌", "要一张牌\n别名:要牌/拿牌"),
-        ("停牌", "停止要牌\n别名:不要了"),
-        ("加倍", "加倍下注\n仅初始2牌时可用"),
-        ("分牌", "拆分同点数牌\n分成两手"),
-        ("买保险", "庄家明牌A时\n购买保险"),
-        ("21点状态", "查看当前牌局"),
-        ("21点开始", "跳过等待\n直接开始"),
-        ("21点帮助", "查看规则和赔率"),
-    ]
-
-    slot = [
-        ("拉杆 [档位]", "单次拉杆\n铜/银/金/至尊"),
-        ("连转 [档位] [次数]", "连续多次拉杆"),
-        ("奖池", "查看各档位\n累积奖池"),
-        ("拉杆记录", "查看拉杆\n历史战绩"),
-        ("拉杆帮助", "查看符号赔率\n说明"),
-    ]
-
-    gambling_records = [
-        ("读博记录", "查看所有博弈\n游戏记录"),
     ]
 
     social = [
@@ -244,12 +172,6 @@ def draw_help_image():
         ("驱灵 [@用户]", "驱散目标的\n海灵守护（需持道具）"),
         ("偷看鱼塘 [@用户]", "查看其他用户的\n鱼塘和鱼类收藏"),
         ("转账 [@用户] [金额]", "向指定用户\n转账金币。别名:赠送"),
-        ("发红包 [金额] [数量] [类型] [口令]", "发送群组红包\n普通/拼手气/口令"),
-        ("领红包 [ID] [口令]", "领取本群红包\n可指定红包ID"),
-        ("红包列表", "查看本群\n可领取红包"),
-        ("红包详情 [ID]", "查看红包详情\n及领取记录"),
-        ("撤回红包 [ID]", "撤回未领完红包\n退还剩余金币"),
-        ("清理红包 [所有]", "清理红包记录\n仅机器人管理员"),
         ("查看称号", "查看我拥有的称号"),
         ("使用称号 [ID]", "装备指定ID称号"),
         ("查看成就", "查看我的成就进度"),
@@ -268,41 +190,6 @@ def draw_help_image():
         ("清仓", "卖出所有库存"),
     ]
 
-    admin = [
-        ("修改金币 [用户ID] [数量]", "修改用户金币"),
-        ("奖励金币 [用户ID] [数量]", "奖励用户金币\n支持中文数字"),
-        ("扣除金币 [用户ID] [数量]", "扣除用户金币"),
-        ("修改高级货币 [用户ID] [数量]", "修改高级货币"),
-        ("奖励高级货币 [用户ID] [数量]", "奖励高级货币"),
-        ("扣除高级货币 [用户ID] [数量]", "扣除高级货币"),
-        ("全体奖励金币 [数量]", "给所有用户\n发放金币\n支持中文数字"),
-        ("全体奖励高级货币 [数量]", "给所有用户\n发放高级货币"),
-        ("全体扣除金币 [数量]", "从所有用户\n扣除金币"),
-        ("全体扣除高级货币 [数量]", "从所有用户\n扣除高级货币"),
-        ("全体发放道具 [道具ID] [数量]", "给所有用户\n发放指定道具"),
-        ("授予称号 [@用户/用户ID] [称号名称]", "授予用户称号"),
-        ("移除称号 [@用户/用户ID] [称号名称]", "移除用户称号"),
-        ("创建称号 [称号名称] [描述] [显示格式]", "创建自定义称号"),
-        ("补充鱼池", "重置所有钓鱼区域\n的稀有鱼剩余数量"),
-        ("开启钓鱼后台管理", "开启Web后台"),
-        ("关闭钓鱼后台管理", "关闭Web后台"),
-        ("代理上线 [用户ID]", "扮演指定用户\n进行操作"),
-        ("代理下线", "恢复为管理员身份"),
-        ("同步初始设定", "危！从初始数据文件\n同步数据"),
-    ]
-
-    loan = [
-        ("借[他/她/它][@用户] [金额]", "向指定用户\n发起借款申请"),
-        ("还[他/她/它][@用户] [金额]", "向放贷人\n进行还款"),
-        ("收[他/她/它][@用户] [金额]", "强制向指定用户\n收款"),
-        ("确认借款 [借条ID]", "确认他人发起的\n借款申请"),
-        ("系统借款 [金额]", "向系统借款\n别名：借钱 / 应急借款"),
-        ("还系统 [金额]", "偿还系统借款\n别名：还钱"),
-        ("一键还债", "偿还全部债务\n别名：全部还清 / 一键还清"),
-        ("借条", "查看自己的借贷记录\n别名：我的借条 / 查看借条"),
-    ]
-
-    # 10. 先计算自适应高度
     def section_delta(item_count: int, cols: int) -> int:
         rows = math.ceil(item_count / cols) if item_count > 0 else 0
         # 与 draw_section 中的垂直占位保持一致：h//2+25 起始 + rows*(card_h+pad) + 35
@@ -317,14 +204,8 @@ def draw_help_image():
     y0_est += section_delta(len(bank), 3)
     y0_est += section_delta(len(market), 3)
     y0_est += section_delta(len(gacha), 3)
-    y0_est += section_delta(len(sicbo), 3)
-    y0_est += section_delta(len(blackjack), 3)
-    y0_est += section_delta(len(slot), 3)
-    y0_est += section_delta(len(gambling_records), 3)
     y0_est += section_delta(len(social), 2)
     y0_est += section_delta(len(exchange), 2)
-    y0_est += section_delta(len(admin), 2)
-    y0_est += section_delta(len(loan), 2)
     footer_y_est = y0_est + 20
     final_height = footer_y_est + 30
 
@@ -334,16 +215,11 @@ def draw_help_image():
 
     # 绘制 Logo 和 标题
     try:
-        logo = Image.open(os.path.join(os.path.dirname(__file__), "resource", "astrbot_logo.jpg"))
-        logo = replace_white_background(logo, bg_top)
-        logo.thumbnail((logo_size, logo_size), Image.Resampling.LANCZOS)
-        mask = Image.new("L", logo.size, 0)
-        mask_draw = ImageDraw.Draw(mask)
-        mask_draw.rounded_rectangle([0, 0, logo.size[0], logo.size[1]], 20, fill=255)
-        output = Image.new("RGBA", logo.size, (0, 0, 0, 0))
-        output.paste(logo, (0, 0))
-        output.putalpha(mask)
-        image.paste(output, (logo_x, logo_y), output)
+        # 使用插件自己的 Logo（带透明圆角），直接按 alpha 贴到背景上
+        logo_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logo.png")
+        logo = Image.open(logo_path).convert("RGBA")
+        logo = logo.resize((logo_size, logo_size), Image.Resampling.LANCZOS)
+        image.paste(logo, (logo_x, logo_y), logo)
     except Exception as e:
         # 如果没有logo文件，绘制一个圆角占位符
         draw.rounded_rectangle((logo_x, logo_y, logo_x + logo_size, logo_y + logo_size),
@@ -364,15 +240,9 @@ def draw_help_image():
     y0 = draw_section("🎒 背包与资产管理", inventory, y0, cols=3)
     y0 = draw_section("🏦 银行系统", bank, y0, cols=3)
     y0 = draw_section("🛒 商店与市场", market, y0, cols=3)
-    y0 = draw_section("🎰 抽卡与概率玩法", gacha, y0, cols=3)
-    y0 = draw_section("🎲 骰宝游戏", sicbo, y0, cols=3)
-    y0 = draw_section("🃏 21点游戏", blackjack, y0, cols=3)
-    y0 = draw_section("🎰 拉杆机游戏", slot, y0, cols=3)
-    y0 = draw_section("📊 读博记录", gambling_records, y0, cols=3)
+    y0 = draw_section("🎰 抽卡", gacha, y0, cols=3)
     y0 = draw_section("👥 社交功能", social, y0, cols=2)
     y0 = draw_section("📈 大宗商品交易所", exchange, y0, cols=2)
-    y0 = draw_section("⚙️ 管理后台（管理员）", admin, y0, cols=2)
-    y0 = draw_section("💵 借贷系统", loan, y0, cols=2)
 
     # 添加底部信息
     footer_y = y0 + 20

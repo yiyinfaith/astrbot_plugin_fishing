@@ -255,7 +255,7 @@ async def shop(plugin: "FishingPlugin", event: AstrMessageEvent):
                             item_emoji = "🗺️"
                         elif "香" in item_name or "驱灵" in item_name:
                             item_emoji = "🕯️"
-                        elif "许可证" in item_name or "擦弹" in item_name:
+                        elif "许可证" in item_name:
                             item_emoji = "📋"
                         elif "符" in item_name or "符文" in item_name:
                             item_emoji = "🔮"

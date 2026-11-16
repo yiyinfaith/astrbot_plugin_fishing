@@ -1,8 +1,8 @@
 """银行系统的 cursor 级原语。
 
 这些函数都接收一个已经处于写事务中的 cursor，自身不开启也不提交事务。
-这样银行仓储和借贷仓储可以在同一个事务里组合调用——例如逾期催收需要同时
-动钱包、银行活期甚至强制解约定期，跨仓储也必须保持原子性。
+这样多个仓储可以在同一个事务里组合调用——例如扣税需要同时动钱包、
+银行活期甚至强制解约定期，跨仓储也必须保持原子性。
 """
 
 import sqlite3
@@ -29,7 +29,6 @@ TX_TAX_DEBT_ADD = "欠税挂账"
 TX_TAX_DEBT_SURCHARGE = "欠税滞纳金"
 TX_TAX_DEBT_REPAY = "欠税补扣"
 TX_TAX_DEBT_WAIVE = "欠税减免"
-TX_LOAN_COLLECT = "借贷催收扣款"
 TX_ADMIN_ADJUST = "管理员调整"
 
 
@@ -335,37 +334,6 @@ def collect_funds(
     result["cancelled_deposits"] = cancelled
     result["collected"] = wallet_taken + bank_taken
     return result
-
-
-def collect_for_loan(
-    cursor: sqlite3.Cursor,
-    user_id: str,
-    amount: int,
-    allow_fixed: bool = True,
-    now: Optional[datetime] = None,
-) -> int:
-    """逾期催收专用：穿透钱包、银行活期与定期扣款，返回实际扣得的金额。
-
-    没有这条路径的话，借款人只要把钱存进银行就能让强制催收颗粒无收。
-    """
-    stamp = _now(now)
-    outcome = collect_funds(
-        cursor, user_id, amount,
-        from_wallet=True, from_bank=True, from_fixed=allow_fixed, now=stamp,
-    )
-    collected = outcome["collected"]
-    if collected > 0:
-        record_transaction(
-            cursor, user_id, TX_LOAN_COLLECT, collected,
-            wallet_delta=-outcome["wallet_taken"],
-            bank_delta=-outcome["bank_taken"],
-            remark=(
-                f"催收 钱包{outcome['wallet_taken']:,}/活期{outcome['bank_taken']:,}"
-                + (f"/解约{outcome['cancelled_deposits']}笔定期" if outcome["cancelled_deposits"] else "")
-            ),
-            now=stamp,
-        )
-    return collected
 
 
 # --- 预约 ---

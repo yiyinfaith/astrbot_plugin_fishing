@@ -57,14 +57,10 @@ class SqliteBankRepository:
             "created_at",
             "last_login_time",
             "last_fishing_time",
-            "last_wipe_bomb_time",
             "last_steal_time",
             "last_electric_fish_time",
             "last_stolen_at",
             "bait_start_time",
-            "last_wof_play_time",
-            "wof_last_action_time",
-            "last_sicbo_time",
         ):
             if isinstance(data.get(key), str):
                 try:

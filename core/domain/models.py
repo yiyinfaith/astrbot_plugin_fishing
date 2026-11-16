@@ -218,9 +218,6 @@ class User:
     exchange_account_status: bool = False # 交易所账户状态
     exchange_capacity_level: int = 0  # 交易所仓库升级等级
 
-    max_wipe_bomb_multiplier: float = 0.0
-    min_wipe_bomb_multiplier: Optional[float] = None
-
     # 装备信息
     equipped_rod_instance_id: Optional[int] = None
     equipped_accessory_instance_id: Optional[int] = None
@@ -231,29 +228,11 @@ class User:
     # 状态信息
     auto_fishing_enabled: bool = False
     last_fishing_time: Optional[datetime] = None
-    last_wipe_bomb_time: Optional[datetime] = None
     last_steal_time: Optional[datetime] = None
     last_electric_fish_time: Optional[datetime] = None
     last_login_time: Optional[datetime] = None
     last_stolen_at: Optional[datetime] = None
-    wipe_bomb_forecast: Optional[str] = None  # 'good' or 'bad'
 
-    # --- 新增：用于“命运之轮”游戏的状态字段 ---
-    in_wheel_of_fate: bool = False
-    wof_current_level: int = 0
-    wof_current_prize: int = 0
-    wof_entry_fee: int = 0
-    last_wof_play_time: datetime | None = None
-    wof_last_action_time: datetime | None = None
-    wof_plays_today: int = 0
-    last_wof_date: Optional[str] = None # YYYY-MM-DD 格式
-    
-    # --- 新增：用于“骰宝”游戏冷却 ---
-    last_sicbo_time: Optional[datetime] = None
-    
-    # --- 新增：用于每日擦弹次数追踪 ---
-    wipe_bomb_attempts_today: int = 0
-    last_wipe_bomb_date: Optional[str] = None # YYYY-MM-DD 格式
 
     def can_afford(self, cost: int) -> bool:
         """判断用户金币是否足够"""
@@ -322,16 +301,6 @@ class GachaRecord:
     def __getitem__(self, item):
         """允许通过属性名访问字段"""
         return getattr(self, item)
-
-@dataclass
-class WipeBombLog:
-    """一条擦弹记录"""
-    log_id: int
-    user_id: str
-    contribution_amount: int
-    reward_multiplier: float
-    reward_amount: int
-    timestamp: datetime
 
 @dataclass
 class MarketListing:
@@ -541,33 +510,3 @@ class ShopOfferReward:
     item_id: int
     quantity: int
     refine_level: Optional[int] = None
-
-
-# ---------------------------------
-# 红包系统实体 (Red Packet Entities)
-# ---------------------------------
-
-@dataclass
-class RedPacket:
-    """红包实体"""
-    packet_id: int
-    sender_id: str
-    group_id: str
-    packet_type: str  # 'normal' 普通红包, 'lucky' 拼手气红包, 'password' 口令红包
-    total_amount: int
-    total_count: int
-    remaining_amount: int
-    remaining_count: int
-    password: Optional[str] = None  # 口令红包的口令
-    created_at: datetime = None
-    expires_at: datetime = None
-    is_expired: bool = False
-
-@dataclass
-class RedPacketRecord:
-    """红包领取记录"""
-    record_id: int
-    packet_id: int
-    user_id: str
-    amount: int
-    claimed_at: datetime = None

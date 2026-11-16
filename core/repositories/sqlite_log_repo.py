@@ -2,9 +2,10 @@ import sqlite3
 import threading
 from typing import Any, Optional, List, Dict
 from datetime import date, datetime, timedelta, timezone
+from astrbot.api import logger
 # 导入抽象基类和领域模型
 from .abstract_repository import AbstractLogRepository
-from ..domain.models import FishingRecord, GachaRecord, WipeBombLog, TaxRecord, UserFishStat
+from ..domain.models import FishingRecord, GachaRecord, TaxRecord, UserFishStat
 
 class SqliteLogRepository(AbstractLogRepository):
     """日志类数据仓储的SQLite实现"""
@@ -50,11 +51,6 @@ class SqliteLogRepository(AbstractLogRepository):
         if not row:
             return None
         return GachaRecord(**row)
-
-    def _row_to_wipe_bomb_log(self, row: sqlite3.Row) -> Optional[WipeBombLog]:
-        if not row:
-            return None
-        return WipeBombLog(**row)
 
     def _row_to_tax_record(self, row: sqlite3.Row) -> Optional[TaxRecord]:
         if not row:
@@ -228,68 +224,6 @@ class SqliteLogRepository(AbstractLogRepository):
             """, (user_id, limit))
             return [self._row_to_gacha_record(row) for row in cursor.fetchall()]
 
-    # --- Wipe Bomb Log Methods ---
-    # 存储时转为 UTC
-    def add_wipe_bomb_log(self, log: WipeBombLog) -> None:
-        timestamp = log.timestamp or datetime.now(self.UTC8)
-        # 如果 timestamp 是 naive datetime，附加 UTC+8 时区
-        if timestamp.tzinfo is None:
-            timestamp = timestamp.replace(tzinfo=self.UTC8)
-
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            # 1) 写入擦弹日志
-            cursor.execute(
-                """INSERT INTO wipe_bomb_log
-                (user_id, contribution_amount, reward_multiplier, reward_amount, timestamp)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (log.user_id, log.contribution_amount, log.reward_multiplier, log.reward_amount, timestamp),
-            )
-
-            # 2) 仅保留当前用户最近10条擦弹日志
-            cursor.execute(
-                """
-                DELETE FROM wipe_bomb_log
-                WHERE user_id = ?
-                  AND log_id NOT IN (
-                    SELECT log_id FROM wipe_bomb_log
-                    WHERE user_id = ?
-                    ORDER BY timestamp DESC, log_id DESC
-                    LIMIT 50
-                  )
-                """,
-                (log.user_id, log.user_id),
-            )
-
-            # 3) 清理30天前的擦弹日志（全局）
-            cutoff_time = datetime.now(self.UTC8) - timedelta(days=30)
-            cursor.execute(
-                """
-                DELETE FROM wipe_bomb_log
-                WHERE timestamp < ?
-                """,
-                (cutoff_time,),
-            )
-
-            conn.commit()
-
-    # 查询时考虑时区
-    def get_wipe_bomb_log_count_today(self, user_id: str) -> int:
-        # 获取 UTC+8 的今天的开始和结束时间点
-        today_start = datetime.now(self.UTC8).replace(hour=0, minute=0, second=0, microsecond=0)
-        today_end = today_start + timedelta(days=1)
-
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT COUNT(*) FROM wipe_bomb_log
-                WHERE user_id = ? AND timestamp >= ? AND timestamp < ?
-                  AND contribution_amount > 0
-            """, (user_id, today_start, today_end))
-            result = cursor.fetchone()
-            return result[0] if result else 0
-
     # --- Check-in Log Methods ---
     def add_check_in(self, user_id: str, check_in_date: date) -> None:
         with self._get_connection() as conn:
@@ -337,17 +271,8 @@ class SqliteLogRepository(AbstractLogRepository):
             return cursor.fetchone() is not None
 
     def add_log(self, user_id: str, log_type: str, message: str) -> None:
-        """添加一条通用日志"""
-        # 由于 fishing_records 表有外键约束，我们使用一个简单的日志表
-        # 或者插入到现有的日志表中，避免外键约束问题
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            # 使用 wipe_bomb_log 表来记录通用日志，因为它没有外键约束
-            cursor.execute("""
-                INSERT INTO wipe_bomb_log (user_id, contribution_amount, reward_multiplier, reward_amount, timestamp)
-                VALUES (?, ?, ?, ?, ?)
-            """, (user_id, 0, 0.0, 0, datetime.now()))
-            conn.commit()
+        """记录一条通用事件日志（只写入 AstrBot 日志，不落库）。"""
+        logger.info(f"[钓鱼][{log_type}] {user_id}: {message}")
 
     # --- Tax Log Methods ---
     def add_tax_record(self, record: TaxRecord) -> None:
@@ -391,15 +316,6 @@ class SqliteLogRepository(AbstractLogRepository):
             )
         """, (cutoff_time, batch_size))
         return cursor.rowcount or 0
-
-    def get_wipe_bomb_logs(self, user_id: str, limit: int = 10) -> List[WipeBombLog]:
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM wipe_bomb_log
-                WHERE user_id = ? ORDER BY timestamp DESC LIMIT ?
-            """, (user_id, limit))
-            return [self._row_to_wipe_bomb_log(row) for row in cursor.fetchall()]
 
     def get_tax_records(self, user_id: str, limit: int = 10) -> List[TaxRecord]:
         with self._get_connection() as conn:
@@ -530,26 +446,6 @@ class SqliteLogRepository(AbstractLogRepository):
             """, (user_id, last_reset))
             result = cursor.fetchone()
             return result[0] > 0 if result else False
-
-    def get_max_wipe_bomb_multiplier(self, user_id: str) -> float:
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT MAX(reward_multiplier) FROM wipe_bomb_log
-                WHERE user_id = ?
-            """, (user_id,))
-            result = cursor.fetchone()
-            return result[0] if result and result[0] is not None else 0.0
-
-    def get_min_wipe_bomb_multiplier(self, user_id: str) -> Optional[float]:
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT MIN(reward_multiplier) FROM wipe_bomb_log
-                WHERE user_id = ?
-            """, (user_id,))
-            result = cursor.fetchone()
-            return result[0] if result and result[0] is not None else None
 
     def get_gacha_records_count_today(
         self, user_id: str, gacha_pool_id: int

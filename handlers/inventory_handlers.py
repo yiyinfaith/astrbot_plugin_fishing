@@ -944,16 +944,7 @@ async def coins(plugin: "FishingPlugin", event: AstrMessageEvent):
     """查看用户金币信息"""
     user_id = plugin._get_effective_user_id(event)
     if user := plugin.user_repo.get_by_id(user_id):
-        msg = f"💰 您的金币余额：{user.coins:,} 金币"
-        
-        # 检查是否有欠款
-        total_debt = plugin.loan_service.get_total_debt(user_id)
-        if total_debt > 0:
-            msg += f"\n💳 总欠款：{total_debt:,} 金币"
-            net_worth = user.coins - total_debt
-            msg += f"\n📊 净资产：{net_worth:,} 金币"
-        
-        yield event.plain_result(msg)
+        yield event.plain_result(f"💰 您的金币余额：{user.coins:,} 金币")
     else:
         yield event.plain_result("❌ 您还没有注册，请先使用 /注册 命令注册。")
 
