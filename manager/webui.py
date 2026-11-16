@@ -1,35 +1,31 @@
-"""AstrBot-native management page and API for the fishing plugin.
+"""AstrBot-native dashboard API for the fishing plugin.
 
 The old release started a separate Quart server from an administrator command.  The
-management surface now lives behind AstrBot's authenticated ``/api/plug`` router.
-This module deliberately keeps the page and API in the plugin so no extra port,
-secret, cookie or independent login flow is required.
+management page now lives in ``pages/dashboard`` and is opened by AstrBot at
+``/plugin-view/astrbot_plugin_fishing/dashboard``.  This module only registers the
+same-origin API under the matching ``dashboard`` prefix.
 """
 
 from __future__ import annotations
 
 import dataclasses
 from datetime import date, datetime
-from pathlib import Path
 from collections.abc import Callable
 from typing import Any
 
 try:
-    from quart import Response, g, request
+    from quart import Response, request
 except ImportError:  # pragma: no cover - only for lightweight unit tests
     Response = None  # type: ignore[assignment]
-    g = None  # type: ignore[assignment]
     request = None  # type: ignore[assignment]
 
 from astrbot.api import logger
 
 PLUGIN_NAME = "astrbot_plugin_fishing"
-_PAGE = Path(__file__).with_name("dashboard.html")
-_LOGO = _PAGE.parent.parent / "logo.png"
 
 
 class FishingWebUI:
-    """Register the fishing administration page in AstrBot's native dashboard."""
+    """Register the fishing dashboard API under AstrBot's plugin route."""
 
     def __init__(self, context: Any, plugin: Any):
         self.context = context
@@ -38,8 +34,6 @@ class FishingWebUI:
 
     def _register_routes(self) -> None:
         routes: tuple[tuple[str, Callable[..., Any], list[str], str], ...] = (
-            ("ui", self.page, ["GET"], "Fishing administration page"),
-            ("logo", self.logo, ["GET"], "Fishing logo"),
             ("overview", self.overview, ["GET"], "Fishing overview"),
             ("users", self.users, ["GET"], "Fishing users"),
             ("titles", self.titles, ["GET"], "Fishing titles"),
@@ -52,7 +46,7 @@ class FishingWebUI:
         )
         for endpoint, handler, methods, description in routes:
             self.context.register_web_api(
-                f"/{PLUGIN_NAME}/{endpoint}", handler, methods, description
+                f"/{PLUGIN_NAME}/dashboard/{endpoint}", handler, methods, description
             )
 
     @staticmethod
@@ -79,60 +73,7 @@ class FishingWebUI:
             return safe
         return safe, status
 
-    @staticmethod
-    def _username() -> str:
-        if g is None:
-            return ""
-        try:
-            value = getattr(g, "username", "")
-            if not value and isinstance(g, dict):
-                value = g.get("username", "")
-            return str(value or "").strip()
-        except (AttributeError, RuntimeError):
-            return ""
-
-    def _guard(self) -> Any | None:
-        """Require the host dashboard JWT and optional configured account allow-list."""
-        username = self._username()
-        if not username:
-            return self._response({"success": False, "message": "请先登录 AstrBot 管理面板。"}, 401)
-        configured: list[Any] = []
-        if hasattr(self.plugin, "config"):
-            raw_webui = self.plugin.config.get("webui", {})
-            if isinstance(raw_webui, dict):
-                configured = raw_webui.get("admins", []) or []
-            configured = configured or self.plugin.config.get("webui_admins", []) or []
-        if configured and username not in {str(item) for item in configured}:
-            return self._response({"success": False, "message": "当前账号没有钓鱼管理权限。"}, 403)
-        return None
-
-    async def page(self):
-        if (failure := self._guard()) is not None:
-            return failure
-        try:
-            html = _PAGE.read_text(encoding="utf-8")
-        except OSError as exc:
-            logger.error("读取钓鱼管理页失败: %s", exc)
-            return self._response({"success": False, "message": "管理页资源读取失败。"}, 500)
-        if Response is None:
-            return html
-        return Response(html, content_type="text/html; charset=utf-8")
-
-    async def logo(self):
-        if (failure := self._guard()) is not None:
-            return failure
-        try:
-            content = _LOGO.read_bytes()
-        except OSError as exc:
-            logger.error("读取钓鱼 Logo 失败: %s", exc)
-            return self._response({"success": False, "message": "Logo 资源读取失败。"}, 404)
-        if Response is None:
-            return content
-        return Response(content, content_type="image/png")
-
     async def overview(self):
-        if (failure := self._guard()) is not None:
-            return failure
         p = self.plugin
         users = p.user_repo.get_all_user_ids()
         result = {
@@ -155,8 +96,6 @@ class FishingWebUI:
         return self._response(result)
 
     async def users(self):
-        if (failure := self._guard()) is not None:
-            return failure
         query = request.args if request is not None else {}
         search = str(query.get("search", "") or "").strip().casefold()
         try:
@@ -176,13 +115,9 @@ class FishingWebUI:
         return self._response({"success": True, "rows": rows[offset : offset + limit], "total": total})
 
     async def titles(self):
-        if (failure := self._guard()) is not None:
-            return failure
         return self._response({"success": True, "rows": self.plugin.user_service.get_all_titles_for_admin().get("titles", [])})
 
     async def templates(self):
-        if (failure := self._guard()) is not None:
-            return failure
         repo = self.plugin.item_template_repo
         return self._response({
             "success": True,
@@ -194,23 +129,15 @@ class FishingWebUI:
         })
 
     async def zones(self):
-        if (failure := self._guard()) is not None:
-            return failure
         return self._response({"success": True, "rows": self.plugin.fishing_zone_service.get_all_zones()})
 
     async def shops(self):
-        if (failure := self._guard()) is not None:
-            return failure
         return self._response({"success": True, "rows": self.plugin.shop_repo.get_all_shops()})
 
     async def gacha(self):
-        if (failure := self._guard()) is not None:
-            return failure
         return self._response({"success": True, "rows": self.plugin.gacha_repo.get_all_pools()})
 
     async def market(self):
-        if (failure := self._guard()) is not None:
-            return failure
         return self._response({
             "success": True,
             "rows": self.plugin.market_service.get_all_market_listings_for_admin(page=1, per_page=100),
@@ -262,8 +189,6 @@ class FishingWebUI:
         return {"success": True, "message": f"已向 {ok} 位用户发放道具，失败 {failed} 位。", "updated": ok, "failed": failed}
 
     async def action(self):
-        if (failure := self._guard()) is not None:
-            return failure
         payload = await self._payload()
         action = str(payload.get("action", "")).strip()
         try:

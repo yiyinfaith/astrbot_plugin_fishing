@@ -2,7 +2,7 @@
 display_name: 全能钓鱼
 desc: 轻量完整的 AstrBot 钓鱼游戏，包含钓鱼、背包、市场、商店、抽卡、红包与交易所。
 short_desc: 钓鱼、经济与社交玩法，管理功能内嵌 AstrBot 面板。
-version: 2.5.0
+version: 1.0.0
 author: "一吟Faith"
 logo: logo.png
 category: 娱乐

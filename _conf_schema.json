@@ -1,17 +1,4 @@
 {
-  "webui": {
-    "description": "AstrBot 面板管理权限",
-    "type": "object",
-    "items": {
-      "admins": {
-        "description": "可管理钓鱼数据的 AstrBot 面板账号",
-        "type": "list",
-        "items": {"type": "string"},
-        "hint": "留空表示允许已登录 AstrBot 管理面板的账号；填写后仅允许这些账号。",
-        "default": []
-      }
-    }
-  },
   "tax": {
     "description": "税收系统配置",
     "type": "object",
