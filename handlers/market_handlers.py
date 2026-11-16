@@ -698,7 +698,7 @@ async def list_any(
     # 检查是否为数字ID（旧格式）
     if token.isdigit():
         yield event.plain_result(
-            "❌ 请使用正确的物品ID！\n\n📝 短码格式：\n• R开头：鱼竿（如 R2N9C）\n• A开头：饰品（如 A7K3Q）\n• D开头：道具（如 D1）\n• F开头：鱼类（如 F3）\n\n💡 提示：使用 /背包 查看您的物品短码"
+            "❌ 请使用正确的物品ID！\n\n📝 短码格式：\n• R开头：鱼竿（如 R2N9C）\n• A开头：饰品（如 A7K3Q）\n• D开头：道具（如 D1）\n• F开头：鱼类（如 F3）\n\n💡 提示：使用 /钓鱼背包 查看您的物品短码"
         )
         return
 

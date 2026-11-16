@@ -9,6 +9,16 @@ from astrbot.api import logger
 from ..domain.models import User
 from .abstract_repository import AbstractUserRepository
 
+# 累计类字段按增量写回，和其他线程的原子更新（如自动钓鱼扣费）叠加，而不是互相覆盖
+COUNTER_FIELDS = ("coins", "premium_currency", "total_fishing_count", "total_weight_caught", "total_coins_earned")
+# 读取时的字段快照，update 时据此只写变化的字段
+_SNAPSHOT_ATTR = "_db_snapshot"
+
+
+def _snapshot(user: User) -> Dict[str, Any]:
+    return {f.name: getattr(user, f.name) for f in dataclasses.fields(User)}
+
+
 class SqliteUserRepository(AbstractUserRepository):
     """用户数据仓储的SQLite实现"""
 
@@ -63,8 +73,8 @@ class SqliteUserRepository(AbstractUserRepository):
         
         # 使用 .keys() 检查字段是否存在，确保向后兼容性
         row_keys = row.keys()
-        
-        return User(
+
+        user = User(
             user_id=row["user_id"],
             nickname=row["nickname"],
             coins=row["coins"],
@@ -92,6 +102,8 @@ class SqliteUserRepository(AbstractUserRepository):
             last_stolen_at=parse_datetime(row["last_stolen_at"]),
             fishing_zone_id=row["fishing_zone_id"],
         )
+        setattr(user, _SNAPSHOT_ATTR, _snapshot(user))
+        return user
 
     def get_by_id(self, user_id: str) -> Optional[User]:
         with self._get_connection() as conn:
@@ -126,10 +138,15 @@ class SqliteUserRepository(AbstractUserRepository):
         这个版本是动态的，可以处理 User 模型中的所有字段，未来扩展也无需修改。
         自动更新 max_coins 如果当前金币数超过历史最高。
         """
+        snapshot = getattr(user, _SNAPSHOT_ATTR, None)
+        if snapshot is not None:
+            self._update_changed(user, snapshot)
+            return
+
         # 自动更新历史最高金币数
         if user.coins > user.max_coins:
             user.max_coins = user.coins
-        
+
         fields = [f.name for f in dataclasses.fields(User) if f.name != 'user_id']
         set_clause = ", ".join([f"{field} = ?" for field in fields])
         values = [getattr(user, field) for field in fields]
@@ -149,6 +166,52 @@ class SqliteUserRepository(AbstractUserRepository):
         except sqlite3.Error as e:
             logger.error(f"更新用户 {user.user_id} 数据时发生数据库错误: {e}")
             raise
+
+    def _update_changed(self, user: User, snapshot: Dict[str, Any]) -> None:
+        """
+        只写回读取后改动过的字段。金币等累计字段按增量写，
+        这样读取之后其他线程做的原子更新（自动钓鱼扣费、出售入账等）不会被旧值覆盖。
+        """
+        sets, values = [], []
+        for field in dataclasses.fields(User):
+            name = field.name
+            if name in ("user_id", "max_coins"):
+                continue
+            new, old = getattr(user, name), snapshot.get(name)
+            if new == old:
+                continue
+            if name in COUNTER_FIELDS and isinstance(new, int) and isinstance(old, int):
+                sets.append(f"{name} = MAX({name} + ?, 0)")
+                values.append(new - old)
+            else:
+                sets.append(f"{name} = ?")
+                values.append(new)
+        if user.max_coins != snapshot.get("max_coins"):
+            sets.append("max_coins = MAX(max_coins, ?)")
+            values.append(user.max_coins)
+        if not sets:
+            return
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(f"UPDATE users SET {', '.join(sets)} WHERE user_id = ?", (*values, user.user_id))
+                if cursor.rowcount == 0:
+                    logger.warning(f"尝试更新不存在的用户 {user.user_id}")
+                    return
+                # 历史最高金币按写入后的实际余额更新
+                cursor.execute("UPDATE users SET max_coins = MAX(max_coins, coins) WHERE user_id = ?", (user.user_id,))
+                row = cursor.execute(
+                    f"SELECT {', '.join(COUNTER_FIELDS)}, max_coins FROM users WHERE user_id = ?", (user.user_id,)
+                ).fetchone()
+                conn.commit()
+        except sqlite3.Error as e:
+            logger.error(f"更新用户 {user.user_id} 数据时发生数据库错误: {e}")
+            raise
+        # 让对象与数据库保持一致，之后再次 update 只写新的改动
+        for i, name in enumerate(COUNTER_FIELDS):
+            setattr(user, name, row[i])
+        user.max_coins = row[len(COUNTER_FIELDS)]
+        setattr(user, _SNAPSHOT_ATTR, _snapshot(user))
 
     def toggle_auto_fishing(self, user_id: str) -> Optional[bool]:
         """原子切换自动钓鱼状态并返回新状态。"""

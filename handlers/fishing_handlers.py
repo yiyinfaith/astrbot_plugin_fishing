@@ -72,7 +72,7 @@ class FishingHandlers:
         user_id = self.plugin._get_effective_user_id(event)
         user = self.plugin.user_repo.get_by_id(user_id)
         if not user:
-            yield event.plain_result("❌ 您还没有注册，请先使用 /注册 命令注册。")
+            yield event.plain_result("❌ 您还没有注册，请先使用 /钓鱼注册 命令注册。")
             return
         # 检查用户钓鱼CD
         lst_time = user.last_fishing_time

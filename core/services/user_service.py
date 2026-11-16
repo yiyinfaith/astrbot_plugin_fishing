@@ -66,6 +66,7 @@ class UserService:
             user_id=user_id,
             nickname=nickname,
             coins=initial_coins,
+            fish_pond_capacity=self._initial_pond_capacity(),
             created_at=get_now()
         )
         self.user_repo.add(new_user)
@@ -75,6 +76,11 @@ class UserService:
             "success": True,
             "message": f"注册成功！欢迎 {nickname} 🎉 你获得了 {initial_coins} 金币作为起始资金{rod_text}。"
         }
+
+    def _initial_pond_capacity(self) -> int:
+        """新玩家的鱼塘容量，即配置里的第一档。"""
+        upgrades = self.config.get("pond_upgrades") or []
+        return upgrades[0]["from"] if upgrades else 480
 
     def _grant_starter_rod(self, user_id: str) -> Optional[str]:
         """新玩家免费获得一根新手鱼竿并自动装备，返回鱼竿名称。"""
@@ -108,6 +114,7 @@ class UserService:
             user_id=user_id,
             nickname=nickname,
             coins=initial_coins,
+            fish_pond_capacity=self._initial_pond_capacity(),
             created_at=get_now()
         )
         self.user_repo.add(new_user)
@@ -171,7 +178,7 @@ class UserService:
         """
         user = self.user_repo.get_by_id(user_id)
         if not user:
-            return {"success": False, "message": "请先注册才能签到"}
+            return {"success": False, "message": "请先发送「钓鱼注册」再签到"}
 
         today = get_today()
         if self.log_repo.has_checked_in(user_id, today):
@@ -636,7 +643,7 @@ class UserService:
         """
         user = self.user_repo.get_by_id(user_id)
         if not user:
-            return {"success": False, "message": "❌ 用户不存在，请先注册"}
+            return {"success": False, "message": "❌ 用户不存在，请先发送「钓鱼注册」"}
         
         # 验证新昵称
         if not isinstance(new_nickname, str) or len(new_nickname.strip()) == 0:

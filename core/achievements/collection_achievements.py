@@ -74,7 +74,7 @@ class LegendaryAccessoryCollected(BaseAchievement):
     name = "海神之佑"
     description = "获得一个稀有度为5的饰品"
     target_value = 1
-    reward = ("premium_currency", 100, 1) # 假设奖励类型
+    reward = ("coins", 10000, 1)
 
     def get_progress(self, context: UserContext) -> int:
         """如果拥有稀有度为5的饰品，则返回1，否则返回0。"""

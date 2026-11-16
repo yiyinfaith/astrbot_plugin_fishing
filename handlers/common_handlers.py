@@ -23,8 +23,8 @@ async def sign_in(self: "FishingPlugin", event: AstrMessageEvent):
     """签到"""
     user_id = self._get_effective_user_id(event)
     result = self.user_service.daily_sign_in(user_id)
-    if result["success"]:
-        yield event.plain_result(result["message"])
+    # 已签到或未注册也要回复，否则玩家不知道指令有没有生效
+    yield event.plain_result(result["message"] if result["success"] else f"❌ {result['message']}")
 
 async def state(self: "FishingPlugin", event: AstrMessageEvent):
     """查看用户状态"""
@@ -42,7 +42,7 @@ async def state(self: "FishingPlugin", event: AstrMessageEvent):
     )
     
     if not user_data:
-        yield event.plain_result('❌ 用户不存在，请先发送"注册"来开始游戏')
+        yield event.plain_result('❌ 用户不存在，请先发送"钓鱼注册"来开始游戏')
         return
     # 生成状态图像
     image = await draw_state_image(user_data, self.data_dir)

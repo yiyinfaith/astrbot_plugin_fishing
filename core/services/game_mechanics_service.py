@@ -17,7 +17,7 @@ from ...core.utils import get_now, get_today
 if TYPE_CHECKING:
     from ..repositories.sqlite_user_repo import SqliteUserRepository
 
-# 一次电鱼最多电走的鱼数
+# 一次电鱼最多电走的鱼数（默认值，可在配置中修改）
 ELECTRIC_FISH_MAX_CATCH = 50
 
 
@@ -289,7 +289,8 @@ class GameMechanicsService:
             else:
                 num_to_steal = random.randint(3, 5)    # 小成功
 
-        num_to_steal = min(num_to_steal, ELECTRIC_FISH_MAX_CATCH)
+        max_catch = self.config.get("electric_fish", {}).get("max_catch", ELECTRIC_FISH_MAX_CATCH)
+        num_to_steal = min(num_to_steal, max(1, int(max_catch)))
         actual_num_to_steal = min(num_to_steal, len(all_fish_in_pond))
         initial_catch = random.sample(all_fish_in_pond, actual_num_to_steal)
 

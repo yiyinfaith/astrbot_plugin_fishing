@@ -20,7 +20,7 @@ from ..services.fishing_zone_service import FishingZoneService
 from .fish_weight_service import FishWeightService
 from ..utils import get_now, get_last_reset_time, calculate_after_refine
 
-# 抽中「6 星及以上」后各星级的相对权重，星级越高越难出；没列出的星级权重为 1
+# 抽中「6 星及以上」后各星级的默认相对权重（可在配置中修改），星级越高越难出；没列出的星级权重为 1
 HIGH_RARITY_WEIGHTS = {6: 15, 7: 4, 8: 1}
 # 通行证当天有效的标记（user_buffs.buff_type 前缀，后接区域 ID）
 ZONE_PASS_BUFF = "ZONE_PASS"
@@ -116,7 +116,7 @@ class FishingService:
         """
         enabled = self.user_repo.toggle_auto_fishing(user_id)
         if enabled is None:
-            return {"success": False, "message": "❌您还没有注册，请先使用 /注册 命令注册。"}
+            return {"success": False, "message": "❌您还没有注册，请先使用 /钓鱼注册 命令注册。"}
 
         if enabled:
             return {"success": True, "message": "🎣 自动钓鱼已开启！"}
@@ -185,7 +185,7 @@ class FishingService:
         notices = [pass_notice] if pass_notice else []
 
         # 2. 计算各种加成和修正值
-        base_success_rate = 0.7 # 基础成功率70%
+        base_success_rate = self.config.get("fishing", {}).get("base_success_rate", 0.7)  # 基础成功率
         quality_modifier = 1.0 # 品质加成
         quantity_modifier = 1.0 # 数量加成
         rare_chance = 0.0 # 稀有鱼出现几率
@@ -735,7 +735,10 @@ class FishingService:
             return 5
 
         # 星级越高越难出
-        weights = [HIGH_RARITY_WEIGHTS.get(r, 1) for r in high_rarities]
+        configured = self.config.get("fishing", {}).get("mythic_weights") or HIGH_RARITY_WEIGHTS
+        weights = [configured.get(r, 1) for r in high_rarities]
+        if sum(weights) <= 0:
+            weights = [1] * len(high_rarities)
         return random.choices(high_rarities, weights=weights, k=1)[0]
 
     def _get_zone_rod_requirement_error(self, user_id: str, zone: FishingZone) -> Optional[str]:

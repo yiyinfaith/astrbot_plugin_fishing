@@ -84,7 +84,7 @@ async def user_backpack(plugin: "FishingPlugin", event: AstrMessageEvent):
                 "• 如果问题持续存在，请联系管理员"
             )
     else:
-        yield event.plain_result("❌ 您还没有注册，请先使用 /注册 命令注册。")
+        yield event.plain_result("❌ 您还没有注册，请先使用 /钓鱼注册 命令注册。")
 
 
 async def pond(plugin: "FishingPlugin", event: AstrMessageEvent):
@@ -208,6 +208,10 @@ async def pond_capacity(plugin: "FishingPlugin", event: AstrMessageEvent):
     pond_capacity = plugin.inventory_service.get_user_fish_pond_capacity(user_id)
     if pond_capacity["success"]:
         message = f"🐠 您的鱼塘容量为 {pond_capacity['current_fish_count']} / {pond_capacity['fish_pond_capacity']} 条鱼。"
+        if pond_capacity.get("next_capacity"):
+            message += f"\n⬆️ 下一档 {pond_capacity['next_capacity']} 条，升级需要 {pond_capacity['next_cost']} 金币（发送「升级鱼塘」）"
+        else:
+            message += "\n已是最大容量。"
         yield event.plain_result(message)
     else:
         yield event.plain_result("❌ 出错啦！请稍后再试。")
@@ -514,7 +518,7 @@ async def refine_help(plugin: "FishingPlugin", event: AstrMessageEvent):
 • /精炼鱼竿 [鱼竿ID]
 • /精炼饰品 [饰品ID]
 • 需要至少两件同模板装备（目标 + 材料）
-• 查看背包以确认实例ID：/背包、/鱼竿、/饰品
+• 查看背包以确认实例ID：/钓鱼背包、/鱼竿、/饰品
 
 """
 
@@ -536,7 +540,7 @@ async def use_equipment(plugin: "FishingPlugin", event: AstrMessageEvent, equipm
     # 检查是否为数字ID（旧格式）
     if token.isdigit():
         yield event.plain_result(
-            "❌ 请使用正确的物品ID！\n\n📝 短码格式：\n• R开头：鱼竿（如 R2N9C）\n• A开头：饰品（如 A7K3Q）\n• D开头：道具（如 D1）\n• B开头：鱼饵（如 B2）\n\n💡 提示：使用 /背包 查看您的物品短码"
+            "❌ 请使用正确的物品ID！\n\n📝 短码格式：\n• R开头：鱼竿（如 R2N9C）\n• A开头：饰品（如 A7K3Q）\n• D开头：道具（如 D1）\n• B开头：鱼饵（如 B2）\n\n💡 提示：使用 /钓鱼背包 查看您的物品短码"
         )
         return
 
@@ -684,7 +688,7 @@ async def refine_equipment(plugin: "FishingPlugin", event: AstrMessageEvent, equ
     # 检查是否为数字ID（旧格式）
     if token.isdigit():
         yield event.plain_result(
-            "❌ 请使用正确的物品ID！\n\n📝 短码格式：\n• R开头：鱼竿（如 R2N9C）\n• A开头：饰品（如 A7K3Q）\n\n💡 提示：使用 /背包 查看您的物品短码"
+            "❌ 请使用正确的物品ID！\n\n📝 短码格式：\n• R开头：鱼竿（如 R2N9C）\n• A开头：饰品（如 A7K3Q）\n\n💡 提示：使用 /钓鱼背包 查看您的物品短码"
         )
         return
 
@@ -741,7 +745,7 @@ async def sell_equipment(plugin: "FishingPlugin", event: AstrMessageEvent, equip
     # 检查是否为数字ID（旧格式）
     if token.isdigit():
         yield event.plain_result(
-            "❌ 请使用正确的物品ID！\n\n📝 短码格式：\n• R开头：鱼竿（如 R2N9C）\n• A开头：饰品（如 A7K3Q）\n• D开头：道具（如 D1）\n\n💡 提示：使用 /背包 查看您的物品短码"
+            "❌ 请使用正确的物品ID！\n\n📝 短码格式：\n• R开头：鱼竿（如 R2N9C）\n• A开头：饰品（如 A7K3Q）\n• D开头：道具（如 D1）\n\n💡 提示：使用 /钓鱼背包 查看您的物品短码"
         )
         return
 
@@ -837,7 +841,7 @@ async def lock_equipment(plugin: "FishingPlugin", event: AstrMessageEvent, equip
     # 检查是否为数字ID（旧格式）
     if token.isdigit():
         yield event.plain_result(
-            "❌ 请使用正确的物品ID！\n\n📝 短码格式：\n• R开头：鱼竿（如 R2N9C）\n• A开头：饰品（如 A7K3Q）\n\n💡 提示：使用 /背包 查看您的物品短码"
+            "❌ 请使用正确的物品ID！\n\n📝 短码格式：\n• R开头：鱼竿（如 R2N9C）\n• A开头：饰品（如 A7K3Q）\n\n💡 提示：使用 /钓鱼背包 查看您的物品短码"
         )
         return
 
@@ -896,7 +900,7 @@ async def unlock_equipment(plugin: "FishingPlugin", event: AstrMessageEvent, equ
     # 检查是否为数字ID（旧格式）
     if token.isdigit():
         yield event.plain_result(
-            "❌ 请使用正确的物品ID！\n\n📝 短码格式：\n• R开头：鱼竿（如 R2N9C）\n• A开头：饰品（如 A7K3Q）\n\n💡 提示：使用 /背包 查看您的物品短码"
+            "❌ 请使用正确的物品ID！\n\n📝 短码格式：\n• R开头：鱼竿（如 R2N9C）\n• A开头：饰品（如 A7K3Q）\n\n💡 提示：使用 /钓鱼背包 查看您的物品短码"
         )
         return
 
@@ -946,7 +950,7 @@ async def coins(plugin: "FishingPlugin", event: AstrMessageEvent):
     if user := plugin.user_repo.get_by_id(user_id):
         yield event.plain_result(f"💰 您的金币余额：{user.coins:,} 金币")
     else:
-        yield event.plain_result("❌ 您还没有注册，请先使用 /注册 命令注册。")
+        yield event.plain_result("❌ 您还没有注册，请先使用 /钓鱼注册 命令注册。")
 
 
 async def premium(plugin: "FishingPlugin", event: AstrMessageEvent):
@@ -955,4 +959,4 @@ async def premium(plugin: "FishingPlugin", event: AstrMessageEvent):
     if user := plugin.user_repo.get_by_id(user_id):
         yield event.plain_result(f"💎 您的高级货币余额：{user.premium_currency}")
     else:
-        yield event.plain_result("❌ 您还没有注册，请先使用 /注册 命令注册。")
+        yield event.plain_result("❌ 您还没有注册，请先使用 /钓鱼注册 命令注册。")

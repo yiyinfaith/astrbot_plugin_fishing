@@ -14,6 +14,10 @@ from ..repositories.abstract_repository import (
 from ..domain.models import Shop, ShopItem, ShopItemCost, ShopItemReward
 
 
+# 一次购买最多生成的鱼竿和饰品数量
+MAX_EQUIPMENT_PER_PURCHASE = 100
+
+
 class ShopService:
     """封装与系统商店相关的业务逻辑（新设计：shops + shop_items）"""
     
@@ -180,6 +184,16 @@ class ShopService:
         if not user:
             return {"success": False, "message": "用户不存在"}
         
+        # 一次购买生成的鱼竿、饰品数量有上限：每件都是单独的实例，太多会长时间占住数据库
+        equipment_per_item = sum(
+            int(r.get("reward_quantity") or 1)
+            for r in self.shop_repo.get_item_rewards(item_id)
+            if r.get("reward_type") in ("rod", "accessory")
+        )
+        if equipment_per_item and equipment_per_item * quantity > MAX_EQUIPMENT_PER_PURCHASE:
+            most = max(1, MAX_EQUIPMENT_PER_PURCHASE // equipment_per_item)
+            return {"success": False, "message": f"装备类商品一次最多购买 {most} 个，请分次购买"}
+
         # 库存检查
         if item.get("stock_total") is not None:
             available_stock = item["stock_total"] - item.get("stock_sold", 0)

@@ -32,6 +32,7 @@ from .core.services.fishing_zone_service import FishingZoneService
 from .core.services.fish_weight_service import FishWeightService
 
 from .core.database.migration import run_migrations
+from .core.game_settings import build_fishing_rules, build_pond_upgrades, build_refine, build_signin
 
 # ==========================================================
 # 导入所有指令函数
@@ -82,12 +83,17 @@ class FishingPlugin(Star):
         user_config = config.get("user", {})
         market_config = config.get("market", {})
         sell_prices_config = config.get("sell_prices", {})
+        fishing_rules = build_fishing_rules(fishing_config)
         
         self.game_config = {
             "fishing": {
                 "cooldown_seconds": fishing_config.get("cooldown_seconds", 180),
                 "auto_fishing_efficiency": fishing_config.get("auto_fishing_efficiency", 0.5),
+                "base_success_rate": fishing_rules["base_success_rate"],
+                "mythic_weights": fishing_rules["mythic_weights"],
             },
+            "signin": build_signin(config.get("signin", {})),
+            "refine": build_refine(config.get("refine", {})),
             "quality_bonus_max_chance": fishing_config.get("quality_bonus_max_chance", 0.35),
             "steal": {
                 "cooldown_seconds": steal_config.get("cooldown_seconds", 14400)
@@ -98,6 +104,7 @@ class FishingPlugin(Star):
                 "base_success_rate": electric_fish_config.get("base_success_rate", 0.6),
                 "failure_penalty_max_rate": electric_fish_config.get("failure_penalty_max_rate", 0.5),
                 "failure_penalty_cap": electric_fish_config.get("failure_penalty_cap", 5000),
+                "max_catch": max(1, int(electric_fish_config.get("max_catch", 50) or 50)),
             },
             "daily_reset_hour": game_global_config.get("daily_reset_hour", 0),
             "user": {
@@ -107,12 +114,7 @@ class FishingPlugin(Star):
             "market": {
                 "listing_tax_rate": market_config.get("listing_tax_rate", 0.05)
             },
-            "pond_upgrades": [
-                { "from": 480, "to": 999, "cost": 50000 },
-                { "from": 999, "to": 9999, "cost": 500000 },
-                { "from": 9999, "to": 99999, "cost": 50000000 },
-                { "from": 99999, "to": 999999, "cost": 5000000000 },
-            ],
+            "pond_upgrades": build_pond_upgrades(config.get("pond", {})),
             "sell_prices": {
                 "rod": { 
                     "1": sell_prices_config.get("by_rarity_1", 100),
@@ -249,20 +251,24 @@ class FishingPlugin(Star):
         # --- 6. 保留数据服务实例，供面板「同步初始设定」使用 ---
         self.data_setup_service = data_setup_service
 
-        # --- 管理员代理：管理员发送者 ID -> 被代理玩家 ID（在面板中设置） ---
-        self.impersonation_map = {}
-
         # --- AstrBot 面板内嵌管理页的后端接口 ---
         self.admin_api = FishingAdminAPI(self)
         self.admin_api.register(self.context, PLUGIN_NAME)
 
+    async def _guard(self, event: AstrMessageEvent, results):
+        """执行一条指令；出错时记录完整日志，并给玩家一个明确的回复，而不是没有反应。"""
+        try:
+            async for r in results:
+                yield r
+        except OverflowError:
+            yield event.plain_result("❌ 输入的数字太大了，请检查后重试")
+        except Exception as e:
+            logger.error(f"[钓鱼] 处理指令「{event.message_str}」出错: {e}", exc_info=True)
+            yield event.plain_result("❌ 处理指令时出错了，请检查参数后重试")
+
     def _get_effective_user_id(self, event: AstrMessageEvent):
-        """获取在当前上下文中应当作为指令执行者的用户ID。
-        - 默认返回消息发送者ID
-        - 若在管理面板中为该发送者开启了代理，则返回被代理用户ID
-        """
-        admin_id = event.get_sender_id()
-        return self.impersonation_map.get(admin_id, admin_id)
+        """执行指令的玩家 ID，即消息发送者。"""
+        return event.get_sender_id()
 
     async def initialize(self):
         """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
@@ -276,187 +282,187 @@ class FishingPlugin(Star):
                                """)
     # =========== 基础与核心 ==========
 
-    @filter.command("注册")
+    @filter.command("钓鱼注册")
     async def register_user(self, event: AstrMessageEvent):
         """注册成为钓鱼游戏玩家，开始你的钓鱼之旅"""
-        async for r in common_handlers.register_user(self, event):
+        async for r in self._guard(event, common_handlers.register_user(self, event)):
             yield r
 
     @filter.command("钓鱼")
     async def fish(self, event: AstrMessageEvent):
         """进行一次钓鱼，消耗金币并获得鱼类或物品"""
-        async for r in self.fishing_handlers.fish(event):
+        async for r in self._guard(event, self.fishing_handlers.fish(event)):
             yield r
 
-    @filter.command("签到")
+    @filter.command("钓鱼签到")
     async def sign_in(self, event: AstrMessageEvent):
         """每日签到领取金币和每日补给"""
-        async for r in common_handlers.sign_in(self, event):
+        async for r in self._guard(event, common_handlers.sign_in(self, event)):
             yield r
 
     @filter.command("自动钓鱼")
     async def auto_fish(self, event: AstrMessageEvent):
         """开启或关闭自动钓鱼，自动钓鱼的出竿频率低于手动"""
-        async for r in self.fishing_handlers.auto_fish(event): 
+        async for r in self._guard(event, self.fishing_handlers.auto_fish(event)):
             yield r
 
     @filter.command("钓鱼记录", alias={"钓鱼日志", "钓鱼历史"})
     async def fishing_log(self, event: AstrMessageEvent):
         """查看你的钓鱼历史记录"""
-        async for r in common_handlers.fishing_log(self, event):
+        async for r in self._guard(event, common_handlers.fishing_log(self, event)):
             yield r
 
     @filter.command("钓鱼状态", alias={"我的状态"})
     async def state(self, event: AstrMessageEvent):
         """查看你的游戏状态，包括金币、等级、装备等信息"""
-        async for r in common_handlers.state(self, event):
+        async for r in self._guard(event, common_handlers.state(self, event)):
             yield r
 
     @filter.command("钓鱼帮助", alias={"钓鱼菜单"})
     async def fishing_help(self, event: AstrMessageEvent):
         """查看钓鱼游戏的帮助信息和所有可用命令"""
-        async for r in common_handlers.fishing_help(self, event):
+        async for r in self._guard(event, common_handlers.fishing_help(self, event)):
             yield r
 
     # =========== 背包与资产 ==========
 
-    @filter.command("背包", alias={"查看背包", "我的背包"})
+    @filter.command("钓鱼背包")
     async def user_backpack(self, event: AstrMessageEvent):
         """查看你的背包，包含所有物品和装备"""
-        async for r in inventory_handlers.user_backpack(self, event):
+        async for r in self._guard(event, inventory_handlers.user_backpack(self, event)):
             yield r
 
     @filter.command("鱼塘")
     async def pond(self, event: AstrMessageEvent):
         """查看你的鱼塘，查看所有已钓到的鱼"""
-        async for r in inventory_handlers.pond(self, event):
+        async for r in self._guard(event, inventory_handlers.pond(self, event)):
             yield r
 
     @filter.command("偷看鱼塘", alias={"查看鱼塘", "偷看"})
     async def peek_pond(self, event: AstrMessageEvent):
         """偷看别人的鱼塘，查看其他玩家的鱼。用法：偷看鱼塘 @用户"""
-        async for r in inventory_handlers.peek_pond(self, event):
+        async for r in self._guard(event, inventory_handlers.peek_pond(self, event)):
             yield r
 
     @filter.command("鱼塘容量")
     async def pond_capacity(self, event: AstrMessageEvent):
         """查看当前鱼塘容量和升级信息"""
-        async for r in inventory_handlers.pond_capacity(self, event):
+        async for r in self._guard(event, inventory_handlers.pond_capacity(self, event)):
             yield r
 
     @filter.command("升级鱼塘", alias={"鱼塘升级"})
     async def upgrade_pond(self, event: AstrMessageEvent):
         """升级鱼塘容量，可以存放更多的鱼"""
-        async for r in inventory_handlers.upgrade_pond(self, event):
+        async for r in self._guard(event, inventory_handlers.upgrade_pond(self, event)):
             yield r
 
     # 水族箱相关命令
     @filter.command("水族箱")
     async def aquarium(self, event: AstrMessageEvent):
         """查看你的水族箱，欣赏展示的珍贵鱼类"""
-        async for r in aquarium_handlers.aquarium(self, event):
+        async for r in self._guard(event, aquarium_handlers.aquarium(self, event)):
             yield r
 
     @filter.command("放入水族箱", alias={"移入水族箱"})
     async def add_to_aquarium(self, event: AstrMessageEvent):
         """将鱼从鱼塘放入水族箱展示。用法：放入水族箱 鱼的编号"""
-        async for r in aquarium_handlers.add_to_aquarium(self, event):
+        async for r in self._guard(event, aquarium_handlers.add_to_aquarium(self, event)):
             yield r
 
     @filter.command("移出水族箱", alias={"移回鱼塘"})
     async def remove_from_aquarium(self, event: AstrMessageEvent):
         """将鱼从水族箱移回鱼塘。用法：移出水族箱 鱼的编号"""
-        async for r in aquarium_handlers.remove_from_aquarium(self, event):
+        async for r in self._guard(event, aquarium_handlers.remove_from_aquarium(self, event)):
             yield r
 
     @filter.command("升级水族箱", alias={"水族箱升级"})
     async def upgrade_aquarium(self, event: AstrMessageEvent):
         """升级水族箱容量，可以展示更多珍贵鱼类"""
-        async for r in aquarium_handlers.upgrade_aquarium(self, event):
+        async for r in self._guard(event, aquarium_handlers.upgrade_aquarium(self, event)):
             yield r
 
     @filter.command("鱼竿")
     async def rod(self, event: AstrMessageEvent):
         """查看你拥有的所有鱼竿"""
-        async for r in inventory_handlers.rod(self, event):
+        async for r in self._guard(event, inventory_handlers.rod(self, event)):
             yield r
 
     @filter.command("精炼", alias={"强化"})
     async def refine_equipment(self, event: AstrMessageEvent):
         """精炼装备提升属性。用法：精炼 装备编号"""
-        async for r in inventory_handlers.refine_equipment(self, event):
+        async for r in self._guard(event, inventory_handlers.refine_equipment(self, event)):
             yield r
 
     @filter.command("出售", alias={"卖出"})
     async def sell_equipment(self, event: AstrMessageEvent):
         """出售装备换取金币。用法：出售 装备编号"""
-        async for r in inventory_handlers.sell_equipment(self, event):
+        async for r in self._guard(event, inventory_handlers.sell_equipment(self, event)):
             yield r
 
     @filter.command("鱼饵")
     async def bait(self, event: AstrMessageEvent):
         """查看你拥有的所有鱼饵"""
-        async for r in inventory_handlers.bait(self, event):
+        async for r in self._guard(event, inventory_handlers.bait(self, event)):
             yield r
 
     @filter.command("道具", alias={"我的道具", "查看道具"})
     async def items(self, event: AstrMessageEvent):
         """查看你拥有的所有道具"""
-        async for r in inventory_handlers.items(self, event):
+        async for r in self._guard(event, inventory_handlers.items(self, event)):
             yield r
 
     @filter.command("开启全部钱袋", alias={"打开全部钱袋", "打开所有钱袋"})
     async def open_all_money_bags(self, event: AstrMessageEvent):
         """一次性打开所有钱袋，获得金币"""
-        async for r in inventory_handlers.open_all_money_bags(self, event):
+        async for r in self._guard(event, inventory_handlers.open_all_money_bags(self, event)):
             yield r
 
     @filter.command("饰品")
     async def accessories(self, event: AstrMessageEvent):
         """查看你拥有的所有饰品"""
-        async for r in inventory_handlers.accessories(self, event):
+        async for r in self._guard(event, inventory_handlers.accessories(self, event)):
             yield r
 
     @filter.command("锁定装备", alias={"上锁"})
     async def lock_equipment(self, event: AstrMessageEvent):
         """锁定装备防止误操作。用法：锁定装备 装备编号"""
-        async for r in inventory_handlers.lock_equipment(self, event):
+        async for r in self._guard(event, inventory_handlers.lock_equipment(self, event)):
             yield r
 
     @filter.command("解锁装备", alias={"开锁"})
     async def unlock_equipment(self, event: AstrMessageEvent):
         """解锁已锁定的装备。用法：解锁装备 装备编号"""
-        async for r in inventory_handlers.unlock_equipment(self, event):
+        async for r in self._guard(event, inventory_handlers.unlock_equipment(self, event)):
             yield r
 
     @filter.command("使用", alias={"装备"})
     async def use_equipment(self, event: AstrMessageEvent):
         """使用或装备物品。用法：使用 物品编号"""
-        async for r in inventory_handlers.use_equipment(self, event):
+        async for r in self._guard(event, inventory_handlers.use_equipment(self, event)):
             yield r
 
     @filter.command("金币", alias={"钱包", "余额"})
     async def coins(self, event: AstrMessageEvent):
         """查看你当前拥有的金币数量"""
-        async for r in inventory_handlers.coins(self, event):
+        async for r in self._guard(event, inventory_handlers.coins(self, event)):
             yield r
 
     @filter.command("转账", alias={"赠送"})
     async def transfer_coins(self, event: AstrMessageEvent):
         """转账金币给其他玩家。用法：转账 @用户 金额"""
-        async for r in common_handlers.transfer_coins(self, event):
+        async for r in self._guard(event, common_handlers.transfer_coins(self, event)):
             yield r
 
     @filter.command("更新昵称", alias={"修改昵称", "改昵称", "昵称"})
     async def update_nickname(self, event: AstrMessageEvent):
         """更新你的游戏昵称。用法：更新昵称 新昵称"""
-        async for r in common_handlers.update_nickname(self, event):
+        async for r in self._guard(event, common_handlers.update_nickname(self, event)):
             yield r
 
     @filter.command("高级货币", alias={"钻石", "星石"})
     async def premium(self, event: AstrMessageEvent):
         """查看你当前拥有的高级货币数量"""
-        async for r in inventory_handlers.premium(self, event):
+        async for r in self._guard(event, inventory_handlers.premium(self, event)):
             yield r
 
     # =========== 钓鱼与图鉴 ==========
@@ -464,13 +470,13 @@ class FishingPlugin(Star):
     @filter.command("钓鱼区域", alias={"区域"})
     async def fishing_area(self, event: AstrMessageEvent):
         """查看所有钓鱼区域和切换钓鱼区域。用法：钓鱼区域 [区域编号]"""
-        async for r in self.fishing_handlers.fishing_area(event):
+        async for r in self._guard(event, self.fishing_handlers.fishing_area(event)):
             yield r
 
     @filter.command("鱼类图鉴", alias={"图鉴"})
     async def fish_pokedex(self, event: AstrMessageEvent):
         """查看鱼类图鉴，了解所有可钓到的鱼"""
-        async for r in self.fishing_handlers.fish_pokedex(event): 
+        async for r in self._guard(event, self.fishing_handlers.fish_pokedex(event)):
             yield r
 
     # =========== 市场与商店 ==========
@@ -478,79 +484,79 @@ class FishingPlugin(Star):
     @filter.command("全部卖出", alias={"全部出售", "卖出全部", "出售全部", "清空鱼"})
     async def sell_all(self, event: AstrMessageEvent):
         """卖出鱼塘中所有的鱼，换取金币"""
-        async for r in market_handlers.sell_all(self, event):
+        async for r in self._guard(event, market_handlers.sell_all(self, event)):
             yield r
 
     @filter.command("保留卖出", alias={"保留出售", "卖出保留", "出售保留"})
     async def sell_keep(self, event: AstrMessageEvent):
         """卖出鱼塘中的鱼，但保留指定数量。用法：保留卖出 保留数量"""
-        async for r in market_handlers.sell_keep(self, event):
+        async for r in self._guard(event, market_handlers.sell_keep(self, event)):
             yield r
 
     @filter.command("砸锅卖铁", alias={"破产", "清空"})
     async def sell_everything(self, event: AstrMessageEvent):
         """卖掉所有可以出售的物品，包括鱼、装备等"""
-        async for r in market_handlers.sell_everything(self, event):
+        async for r in self._guard(event, market_handlers.sell_everything(self, event)):
             yield r
 
     @filter.command("出售稀有度", alias={"稀有度出售", "出售星级"})
     async def sell_by_rarity(self, event: AstrMessageEvent):
         """按稀有度出售鱼。用法：出售稀有度 星级"""
-        async for r in market_handlers.sell_by_rarity(self, event):
+        async for r in self._guard(event, market_handlers.sell_by_rarity(self, event)):
             yield r
 
     @filter.command("出售所有鱼竿", alias={"出售全部鱼竿", "卖出所有鱼竿", "卖出全部鱼竿", "清空鱼竿"})
     async def sell_all_rods(self, event: AstrMessageEvent):
         """出售所有未装备且未锁定的鱼竿"""
-        async for r in market_handlers.sell_all_rods(self, event):
+        async for r in self._guard(event, market_handlers.sell_all_rods(self, event)):
             yield r
 
     @filter.command("出售所有饰品", alias={"出售全部饰品", "卖出所有饰品", "卖出全部饰品", "清空饰品"})
     async def sell_all_accessories(self, event: AstrMessageEvent):
         """出售所有未装备且未锁定的饰品"""
-        async for r in market_handlers.sell_all_accessories(self, event):
+        async for r in self._guard(event, market_handlers.sell_all_accessories(self, event)):
             yield r
 
     @filter.command("商店")
     async def shop(self, event: AstrMessageEvent):
         """查看所有可用的商店"""
-        async for r in market_handlers.shop(self, event):
+        async for r in self._guard(event, market_handlers.shop(self, event)):
             yield r
 
     @filter.command("商店购买", alias={"购买商店商品", "购买商店"})
     async def buy_in_shop(self, event: AstrMessageEvent):
         """从商店购买商品。用法：商店购买 商品编号 [数量]"""
-        async for r in market_handlers.buy_in_shop(self, event):
+        async for r in self._guard(event, market_handlers.buy_in_shop(self, event)):
             yield r
 
     @filter.command("市场")
     async def market(self, event: AstrMessageEvent):
         """查看玩家市场中的所有上架商品"""
-        async for r in market_handlers.market(self, event):
+        async for r in self._guard(event, market_handlers.market(self, event)):
             yield r
 
     @filter.command("上架")
     async def list_any(self, event: AstrMessageEvent):
         """将物品上架到市场出售。用法：上架 物品编号 价格"""
-        async for r in market_handlers.list_any(self, event):
+        async for r in self._guard(event, market_handlers.list_any(self, event)):
             yield r
 
     @filter.command("购买")
     async def buy_item(self, event: AstrMessageEvent):
         """从市场购买玩家上架的商品。用法：购买 订单编号"""
-        async for r in market_handlers.buy_item(self, event):
+        async for r in self._guard(event, market_handlers.buy_item(self, event)):
             yield r
 
     @filter.command("我的上架", alias={"上架列表", "我的商品", "我的挂单"})
     async def my_listings(self, event: AstrMessageEvent):
         """查看你在市场上架的所有商品"""
-        async for r in market_handlers.my_listings(self, event):
+        async for r in self._guard(event, market_handlers.my_listings(self, event)):
             yield r
 
     @filter.command("下架")
     async def delist_item(self, event: AstrMessageEvent):
         """从市场下架你上架的商品。用法：下架 订单编号"""
-        async for r in market_handlers.delist_item(self, event):
+        async for r in self._guard(event, market_handlers.delist_item(self, event)):
             yield r
 
     # =========== 抽卡 ==========
@@ -558,25 +564,25 @@ class FishingPlugin(Star):
     @filter.command("抽卡", alias={"抽奖"})
     async def gacha(self, event: AstrMessageEvent):
         """进行一次抽卡，有机会获得稀有装备和道具"""
-        async for r in gacha_handlers.gacha(self, event):
+        async for r in self._guard(event, gacha_handlers.gacha(self, event)):
             yield r
 
     @filter.command("十连")
     async def ten_gacha(self, event: AstrMessageEvent):
         """进行十次连续抽卡，有保底机制"""
-        async for r in gacha_handlers.ten_gacha(self, event):
+        async for r in self._guard(event, gacha_handlers.ten_gacha(self, event)):
             yield r
 
     @filter.command("查看卡池", alias={"卡池"})
     async def view_gacha_pool(self, event: AstrMessageEvent):
         """查看当前卡池中的所有物品及其概率"""
-        async for r in gacha_handlers.view_gacha_pool(self, event):
+        async for r in self._guard(event, gacha_handlers.view_gacha_pool(self, event)):
             yield r
 
     @filter.command("抽卡记录")
     async def gacha_history(self, event: AstrMessageEvent):
         """查看你的抽卡历史记录"""
-        async for r in gacha_handlers.gacha_history(self, event):
+        async for r in self._guard(event, gacha_handlers.gacha_history(self, event)):
             yield r
 
     # =========== 社交 ==========
@@ -584,43 +590,43 @@ class FishingPlugin(Star):
     @filter.command("排行榜", alias={"phb"})
     async def ranking(self, event: AstrMessageEvent):
         """查看金币、鱼类等各种排行榜"""
-        async for r in social_handlers.ranking(self, event):
+        async for r in self._guard(event, social_handlers.ranking(self, event)):
             yield r
 
     @filter.command("偷鱼")
     async def steal_fish(self, event: AstrMessageEvent):
         """偷取其他玩家的鱼，但有失败风险。用法：偷鱼 @用户"""
-        async for r in social_handlers.steal_fish(self, event):
+        async for r in self._guard(event, social_handlers.steal_fish(self, event)):
             yield r
 
     @filter.command("电鱼")
     async def electric_fish(self, event: AstrMessageEvent):
         """对其他玩家使用电鱼，成功可获得金币。用法：电鱼 @用户"""
-        async for r in social_handlers.electric_fish(self, event):
+        async for r in self._guard(event, social_handlers.electric_fish(self, event)):
             yield r
 
     @filter.command("驱灵")
     async def dispel_protection(self, event: AstrMessageEvent):
         """驱散目标玩家的保护效果。用法：驱灵 @用户"""
-        async for r in social_handlers.dispel_protection(self, event):
+        async for r in self._guard(event, social_handlers.dispel_protection(self, event)):
             yield r
 
     @filter.command("查看称号", alias={"称号"})
     async def view_titles(self, event: AstrMessageEvent):
         """查看你拥有的所有称号"""
-        async for r in social_handlers.view_titles(self, event):
+        async for r in self._guard(event, social_handlers.view_titles(self, event)):
             yield r
 
     @filter.command("使用称号")
     async def use_title(self, event: AstrMessageEvent):
         """装备或卸下称号。用法：使用称号 称号编号"""
-        async for r in social_handlers.use_title(self, event):
+        async for r in self._guard(event, social_handlers.use_title(self, event)):
             yield r
 
     @filter.command("查看成就", alias={"成就"})
     async def view_achievements(self, event: AstrMessageEvent):
         """查看你的成就完成情况"""
-        async for r in social_handlers.view_achievements(self, event):
+        async for r in self._guard(event, social_handlers.view_achievements(self, event)):
             yield r
 
     async def terminate(self):

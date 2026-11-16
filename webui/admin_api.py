@@ -362,9 +362,6 @@ class FishingAdminAPI:
             ("broadcast/currency", "POST", self.broadcast_currency, "全体发放或扣除货币"),
             ("broadcast/item", "POST", self.broadcast_item, "全体发放物品"),
             ("ops/sync", "POST", self.ops_sync, "同步初始设定"),
-            ("ops/impersonation", "GET", self.impersonation_list, "代理列表"),
-            ("ops/impersonation/start", "POST", self.impersonation_start, "开始代理"),
-            ("ops/impersonation/stop", "POST", self.impersonation_stop, "结束代理"),
             # 物品模板与称号
             ("templates", "GET", self.templates_list, "物品模板列表"),
             ("templates/save", "POST", self.template_save, "保存物品模板"),
@@ -524,7 +521,6 @@ class FishingAdminAPI:
                 "shops": len(p.shop_repo.get_all_shops()),
                 "gacha_pools": len(p.item_template_service.get_all_gacha_pools()),
             },
-            "impersonations": len(p.impersonation_map),
         }
 
     def meta(self, query, body):
@@ -579,7 +575,6 @@ class FishingAdminAPI:
             "equipped_accessory": result["equipped_accessory"],
             "current_title": result["current_title"],
             "titles": result.get("titles", []),
-            "impersonated_by": [a for a, t in self.p.impersonation_map.items() if t == user.user_id],
         }
 
     def _user_fields(self, data: dict) -> dict:
@@ -615,9 +610,6 @@ class FishingAdminAPI:
 
     def user_delete(self, query, body):
         user = self._user_or_error(body.get("user_id"))
-        self.p.impersonation_map = {
-            admin: target for admin, target in self.p.impersonation_map.items() if target != user.user_id
-        }
         return _check(self.p.user_service.delete_user_for_admin(user.user_id))
 
     def user_currency(self, query, body):
@@ -753,33 +745,6 @@ class FishingAdminAPI:
     def ops_sync(self, query, body):
         self.p.data_setup_service.sync_all_initial_data()
         return {"message": "初始设定已同步"}
-
-    def impersonation_list(self, query, body):
-        rows = []
-        for admin_id, target_id in self.p.impersonation_map.items():
-            user = self.p.user_repo.get_by_id(target_id)
-            rows.append({
-                "admin_id": admin_id,
-                "target_id": target_id,
-                "target_nickname": user.nickname if user else None,
-            })
-        return {"rows": rows}
-
-    def impersonation_start(self, query, body):
-        admin_id = _text(body.get("admin_id"), "管理员账号 ID", required=True, max_len=128)
-        target = self._user_or_error(body.get("target_id"))
-        if admin_id == target.user_id:
-            raise ApiError("不能代理自己")
-        self.p.impersonation_map[admin_id] = target.user_id
-        logger.info(f"[钓鱼管理] {admin_id} 开始代理 {target.user_id}")
-        return {"message": f"{admin_id} 发送的游戏指令将以 {target.nickname or target.user_id} 的身份执行"}
-
-    def impersonation_stop(self, query, body):
-        admin_id = _text(body.get("admin_id"), "管理员账号 ID", required=True, max_len=128)
-        if self.p.impersonation_map.pop(admin_id, None) is None:
-            raise ApiError("该账号当前没有代理任何玩家")
-        logger.info(f"[钓鱼管理] {admin_id} 结束代理")
-        return {"message": f"{admin_id} 已结束代理"}
 
     # ------------------------------------------------------------------
     # 物品模板

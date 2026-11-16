@@ -208,6 +208,60 @@ class GameRuleTests(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertGreaterEqual(self.coins(thief), 1_000_000 - 5000)
 
+    # 审计：装备类商品一次最多买 100 件，避免长时间占住数据库
+    def test_equipment_purchase_is_capped(self):
+        uid = self.new_user(coins=1_000_000)
+        offer = self.shop_item("新手木竿")
+        self.assertFalse(self.plugin.shop_service.purchase_item(uid, offer, 101)["success"])
+        self.assertTrue(self.plugin.shop_service.purchase_item(uid, offer, 100)["success"])
+
+    # 审计：重复签到要有回复；参数里的数字过大不会让指令没反应
+    def test_command_replies(self):
+        uid = self.new_user()
+
+        class Event:
+            def __init__(self, text):
+                self.message_str = text
+
+            def get_sender_id(self):
+                return uid
+
+            def plain_result(self, text):
+                return text
+
+        async def say(method, text):
+            return [r async for r in getattr(self.plugin, method)(Event(text))]
+
+        self.assertIn("签到成功", run(say("sign_in", "钓鱼签到"))[0])
+        self.assertIn("已经签到过了", run(say("sign_in", "钓鱼签到"))[0])
+        self.assertIn("数字太大", run(say("view_gacha_pool", "查看卡池 99999999999999999999"))[0])
+
+    # 审计：指令写回玩家数据时不覆盖后台线程同时做的原子更新
+    def test_user_update_keeps_concurrent_changes(self):
+        from datetime import datetime
+        uid = self.new_user(coins=1000)
+        stale = self.plugin.user_repo.get_by_id(uid)
+        # 后台自动钓鱼在这期间扣了一竿的钱
+        fished_at = datetime(2030, 1, 1, 12, 0, 0)
+        self.assertTrue(self.plugin.user_repo.record_failed_fishing(uid, 10, fished_at))
+        stale.coins += 100
+        stale.nickname = "新名字"
+        self.plugin.user_repo.update(stale)
+        fresh = self.plugin.user_repo.get_by_id(uid)
+        self.assertEqual(fresh.coins, 1090)
+        self.assertEqual(fresh.nickname, "新名字")
+        self.assertEqual(fresh.last_fishing_time.replace(tzinfo=None), fished_at)
+        # 同一个对象再次写回不会重复加钱
+        self.plugin.user_repo.update(stale)
+        self.assertEqual(self.plugin.user_repo.get_by_id(uid).coins, 1090)
+        self.assertGreaterEqual(self.plugin.user_repo.get_by_id(uid).max_coins, 1090)
+
+    # 审计：成就奖励的类型都能发放
+    def test_achievement_rewards_are_supported(self):
+        for ach in self.plugin.achievement_service.achievements:
+            if getattr(ach, "reward", None):
+                self.assertIn(ach.reward[0], ("coins", "title", "bait", "rod", "accessory"), ach.name)
+
     # 10. 除了新手木竿，内置鱼竿都有耐久
     def test_rod_durability(self):
         for rod in self.templates.get_all_rods():

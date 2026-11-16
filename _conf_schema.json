@@ -9,6 +9,14 @@
         "hint": "每次钓鱼后的冷却时间，单位为秒",
         "default": 180
       },
+      "base_success_rate": {
+        "description": "基础钓鱼成功率",
+        "type": "float",
+        "hint": "不带鱼饵时每次钓鱼钓到东西的概率，默认 0.7。区域收益按这个值设计，调高会整体提高收益",
+        "default": 0.7,
+        "min": 0.05,
+        "max": 1.0
+      },
       "auto_fishing_efficiency": {
         "description": "自动钓鱼效率",
         "type": "float",
@@ -24,6 +32,12 @@
         "default": 0.35,
         "min": 0.0,
         "max": 1.0
+      },
+      "mythic_weights": {
+        "description": "6/7/8 星神话鱼比例",
+        "type": "string",
+        "hint": "抽中「6 星及以上」后 6、7、8 星各自的相对权重，逗号分隔，默认 15,4,1，即 75% / 20% / 5%",
+        "default": "15,4,1"
       }
     }
   },
@@ -76,6 +90,12 @@
         "type": "int",
         "hint": "按百分比算出的罚款超过这个数时按这个数扣，0 表示不封顶",
         "default": 5000
+      },
+      "max_catch": {
+        "description": "电鱼一次最多电走的鱼数",
+        "type": "int",
+        "hint": "成功时电走的鱼不超过这个数，默认 50",
+        "default": 50
       }
     }
   },
@@ -88,6 +108,96 @@
         "type": "int",
         "hint": "每日刷新的时间点（小时，0-23），默认为0表示0点刷新。区域通行证当天有效，到这个时间失效",
         "default": 0
+      }
+    }
+  },
+  "signin": {
+    "description": "签到配置",
+    "type": "object",
+    "items": {
+      "min_reward": {
+        "description": "签到最少金币",
+        "type": "int",
+        "hint": "每日签到随机获得的金币下限，默认 100",
+        "default": 100
+      },
+      "max_reward": {
+        "description": "签到最多金币",
+        "type": "int",
+        "hint": "每日签到随机获得的金币上限，默认 300",
+        "default": 300
+      }
+    }
+  },
+  "pond": {
+    "description": "鱼塘配置",
+    "type": "object",
+    "items": {
+      "capacities": {
+        "description": "鱼塘容量档位",
+        "type": "string",
+        "hint": "从小到大逗号分隔，第一个是新玩家的初始容量。默认 480,1000,2000,5000,10000",
+        "default": "480,1000,2000,5000,10000"
+      },
+      "upgrade_costs": {
+        "description": "鱼塘升级价格",
+        "type": "string",
+        "hint": "依次是升到第 2、3……档的价格，个数比容量档位少 1。默认 20000,100000,500000,2000000",
+        "default": "20000,100000,500000,2000000"
+      }
+    }
+  },
+  "refine": {
+    "description": "精炼配置",
+    "type": "object",
+    "items": {
+      "base_costs": {
+        "description": "精炼基础费用",
+        "type": "string",
+        "hint": "9 个数，依次是 1→2 级、2→3 级……9→10 级的基础费用，实际费用 = 基础费用 × 星级倍率",
+        "default": "10000,30000,50000,100000,200000,500000,1000000,2000000,5000000"
+      },
+      "cost_multipliers": {
+        "description": "精炼费用星级倍率",
+        "type": "string",
+        "hint": "7 个数，依次对应 1、2、3、4、5、6 星和 7 星及以上装备",
+        "default": "0.1,0.15,0.2,0.25,0.5,0.7,1.0"
+      },
+      "success_rates_1_2": {
+        "description": "1-2 星精炼成功率",
+        "type": "string",
+        "hint": "9 个 0～1 的数，依次是精炼到 2 级、3 级……10 级的成功率",
+        "default": "0.95,0.90,0.90,0.85,0.80,0.75,0.70,0.60,0.50"
+      },
+      "success_rates_3": {
+        "description": "3 星精炼成功率",
+        "type": "string",
+        "hint": "同上，9 个数",
+        "default": "0.90,0.85,0.85,0.80,0.75,0.65,0.55,0.45,0.35"
+      },
+      "success_rates_4": {
+        "description": "4 星精炼成功率",
+        "type": "string",
+        "hint": "同上，9 个数",
+        "default": "0.85,0.80,0.80,0.75,0.70,0.60,0.50,0.40,0.30"
+      },
+      "success_rates_5": {
+        "description": "5 星精炼成功率",
+        "type": "string",
+        "hint": "同上，9 个数",
+        "default": "0.85,0.80,0.75,0.65,0.50,0.40,0.35,0.30,0.25"
+      },
+      "success_rates_6": {
+        "description": "6 星精炼成功率",
+        "type": "string",
+        "hint": "同上，9 个数",
+        "default": "0.80,0.75,0.70,0.60,0.45,0.35,0.30,0.25,0.20"
+      },
+      "success_rates_7_plus": {
+        "description": "7 星及以上精炼成功率",
+        "type": "string",
+        "hint": "同上，9 个数",
+        "default": "0.8,0.8,0.8,0.7,0.6,0.5,0.4,0.3,0.2"
       }
     }
   },

@@ -11,6 +11,7 @@ from ..repositories.abstract_repository import (
 from .effect_manager import EffectManager
 from ..utils import calculate_after_refine
 from .game_mechanics_service import GameMechanicsService
+from ..game_settings import build_refine, refine_tables_for_rarity
 
 
 class InventoryService:
@@ -768,11 +769,21 @@ class InventoryService:
         if not user:
             return {"success": False, "message": "用户不存在"}
         fish_inventory = self.inventory_repo.get_fish_inventory(user_id)
+        next_upgrade = self._next_pond_upgrade(user.fish_pond_capacity)
         return {
             "success": True,
             "fish_pond_capacity": user.fish_pond_capacity,
             "current_fish_count": sum(item.quantity for item in fish_inventory),
+            "next_capacity": next_upgrade["to"] if next_upgrade else None,
+            "next_cost": next_upgrade["cost"] if next_upgrade else None,
         }
+
+    def _next_pond_upgrade(self, capacity: int):
+        """下一档鱼塘升级。容量不在档位上（如管理员改过）时取第一个更大的档位。"""
+        for upgrade in self.config.get("pond_upgrades", []):
+            if upgrade["to"] > capacity:
+                return upgrade
+        return None
 
     def upgrade_fish_pond(self, user_id: str) -> Dict[str, Any]:
         """
@@ -782,14 +793,7 @@ class InventoryService:
         if not user:
             return {"success": False, "message": "用户不存在"}
 
-        upgrade_path = self.config.get("pond_upgrades", [])
-        current_capacity = user.fish_pond_capacity
-
-        next_upgrade = None
-        for upgrade in upgrade_path:
-            if upgrade["from"] == current_capacity:
-                next_upgrade = upgrade
-                break
+        next_upgrade = self._next_pond_upgrade(user.fish_pond_capacity)
 
         if not next_upgrade:
             return {"success": False, "message": "鱼塘容量已达到最大，无法再升级"}
@@ -823,13 +827,6 @@ class InventoryService:
         if not user:
             return {"success": False, "message": "用户不存在"}
 
-        # 精炼费用表 (1-10级)
-        refine_costs = {
-            1: 10000, 2: 30000, 3: 50000, 4: 100000,
-            5: 200000, 6: 500000, 7: 1000000, 8: 2000000,
-            9: 5000000, 10: 10000000
-        }
-
         # 根据物品类型设置相关配置
         if item_type not in ["rod", "accessory"]:
             return {"success": False, "message": "❌ 不支持的精炼类型"}
@@ -852,7 +849,7 @@ class InventoryService:
         rarity = template.rarity if hasattr(template, 'rarity') else 5
 
         # 根据稀有度调整精炼费用和成功率
-        refine_costs, success_rates = self._get_refine_config_by_rarity(rarity, refine_costs)
+        refine_costs, success_rates = self._get_refine_config_by_rarity(rarity)
 
         # 获取同类型物品列表
         same_items = config["same_items"]
@@ -928,74 +925,10 @@ class InventoryService:
                     }
 
 
-    def _get_refine_config_by_rarity(self, rarity: int, base_costs: dict) -> tuple:
-        """
-        根据装备稀有度获取精炼费用和成功率
-        重构设计：让低星装备更容易精炼到高等级，以追上高星装备的基础属性
-        
-        Args:
-            rarity: 装备稀有度 (1-10星)
-            base_costs: 基础费用表
-            
-        Returns:
-            tuple: (调整后的费用表, 成功率表)
-        """
-        # 1-4星装备：逐级递减成功率，让高等级精炼有挑战性
-        if rarity <= 4:
-            # 费用大幅减少，让低星装备精炼更便宜
-            cost_multiplier = 0.1 + (rarity - 1) * 0.05  # 1星10%, 2星15%, 3星20%, 4星25%
-            adjusted_costs = {level: int(cost * cost_multiplier) for level, cost in base_costs.items()}
-            
-            # 重新设计成功率：低等级高成功率，高等级逐渐降低
-            if rarity <= 2:  # 1-2星：保持较高成功率
-                success_rates = {
-                    1: 0.95, 2: 0.95, 3: 0.90, 4: 0.90,
-                    5: 0.85, 6: 0.80, 7: 0.75, 8: 0.70,
-                    9: 0.60, 10: 0.50
-                }
-            elif rarity == 3:  # 3星：中等成功率
-                success_rates = {
-                    1: 0.90, 2: 0.90, 3: 0.85, 4: 0.85,
-                    5: 0.80, 6: 0.75, 7: 0.65, 8: 0.55,
-                    9: 0.45, 10: 0.35
-                }
-            else:  # 4星：更有挑战性
-                success_rates = {
-                    1: 0.85, 2: 0.85, 3: 0.80, 4: 0.80,
-                    5: 0.75, 6: 0.70, 7: 0.60, 8: 0.50,
-                    9: 0.40, 10: 0.30
-                }
-            
-        # 5-6星装备：中等费用；成功率按设计在6级附近≈50%，越往后越难
-        elif rarity <= 6:
-            # 费用适中
-            cost_multiplier = 0.5 + (rarity - 5) * 0.2  # 5星50%, 6星70%
-            adjusted_costs = {level: int(cost * cost_multiplier) for level, cost in base_costs.items()}
-
-            # 区分5星与6星的成功率曲线
-            if rarity == 5:
-                success_rates = {
-                    1: 0.85, 2: 0.85, 3: 0.80, 4: 0.75,
-                    5: 0.65, 6: 0.50, 7: 0.40, 8: 0.35,
-                    9: 0.30, 10: 0.25
-                }
-            else:  # rarity == 6
-                success_rates = {
-                    1: 0.80, 2: 0.80, 3: 0.75, 4: 0.70,
-                    5: 0.60, 6: 0.45, 7: 0.35, 8: 0.30,
-                    9: 0.25, 10: 0.20
-                }
-            
-        # 7星及以上装备：保持挑战性
-        else:
-            adjusted_costs = base_costs.copy()
-            success_rates = {
-                1: 0.8, 2: 0.8, 3: 0.8, 4: 0.8,
-                5: 0.7, 6: 0.6, 7: 0.5, 8: 0.4,
-                9: 0.3, 10: 0.2
-            }
-        
-        return adjusted_costs, success_rates
+    def _get_refine_config_by_rarity(self, rarity: int) -> tuple:
+        """按装备星级取精炼费用表和成功率表（来自配置 refine，未配置时用默认值）。"""
+        refine = self.config.get("refine") or build_refine({})
+        return refine_tables_for_rarity(refine, rarity)
 
     def _determine_failure_type(self, instance, template) -> str:
         """

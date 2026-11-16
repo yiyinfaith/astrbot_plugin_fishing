@@ -27,6 +27,8 @@ REMOVED_COMMANDS = [
     "交易所", "持仓", "交易所升级", "升级交易所", "交易所扩容", "清仓",
     # 与其他插件重名，改为「锁定装备」「解锁装备」「钓鱼状态」
     "锁定", "解锁", "状态", "菜单",
+    # 改为「钓鱼注册」「钓鱼签到」「钓鱼背包」
+    "注册", "签到", "背包", "查看背包", "我的背包",
 ]
 
 
@@ -49,7 +51,7 @@ class CommandSurfaceTests(unittest.TestCase):
         self.assertNotIn("filter.regex", MAIN_SOURCE)
         # 保留的核心玩法仍在
         for command in ("钓鱼", "鱼塘", "商店", "商店购买", "市场", "上架", "购买", "下架", "出售", "抽卡", "偷鱼", "排行榜", "转账",
-                        "锁定装备", "解锁装备", "钓鱼状态"):
+                        "锁定装备", "解锁装备", "钓鱼状态", "钓鱼注册", "钓鱼签到", "钓鱼背包"):
             self.assertIn(command, names)
 
     def test_removed_modules_are_gone(self):
@@ -211,15 +213,15 @@ class AdminApiTests(unittest.TestCase):
         with self.assertRaises(self.ApiError):
             self.call(self.api.market_list, query={"item_type": "commodity"})
 
-    def test_impersonation_maps_sender_to_player(self):
-        self.call(self.api.impersonation_start, body={"admin_id": "9", "target_id": "1002"})
+    def test_impersonation_is_removed(self):
+        self.assertFalse(hasattr(self.plugin, "impersonation_map"))
+        routes = {r[0] for r in self.api.routes()}
+        self.assertFalse({"ops/impersonation", "ops/impersonation/start", "ops/impersonation/stop"} & routes)
 
         class Event:
             def get_sender_id(self):
                 return "9"
 
-        self.assertEqual(self.plugin._get_effective_user_id(Event()), "1002")
-        self.call(self.api.impersonation_stop, body={"admin_id": "9"})
         self.assertEqual(self.plugin._get_effective_user_id(Event()), "9")
 
     def test_every_read_endpoint_serializes(self):

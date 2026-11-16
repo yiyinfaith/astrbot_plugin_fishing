@@ -238,7 +238,7 @@ const LOADERS = {
   zones: async () => { state.data.zones = await get('zones'); },
   templates: async () => { state.data.templates = await get('templates', { kind: state.templates.kind }); },
   titles: async () => { state.data.titles = await get('titles'); },
-  ops: async () => { state.data.impersonation = await get('ops/impersonation'); },
+  ops: async () => {},
 };
 
 async function loadCatalog() { state.catalog = await get('catalog'); }
@@ -279,7 +279,6 @@ function overviewView() {
     ['钓鱼区域', `${fmt(c.active_zones)} / ${fmt(c.zones)} 个开放`, 'zones'],
     ['商店 / 卡池', `${fmt(c.shops)} 个商店 · ${fmt(c.gacha_pools)} 个卡池`, 'shops'],
     ['市场挂单', `${fmt(market.total_listings)} 单`, 'market'],
-    ['管理员代理', o.impersonations ? badge(`${o.impersonations} 个进行中`, 'warn') : badge('无', 'off'), 'ops'],
   ].map(([label, value, tab]) => `<div class="row"><h4>${label}</h4><button type="button" class="btn text" data-action="goto" data-tab="${tab}">${value}</button></div>`).join('');
   return shell('总览', '玩家、资产与游戏内容的实时概况。', `<div class="stack">
     <section class="grid metrics">
@@ -363,8 +362,7 @@ async function openUserDetail(userId) {
         ['钓鱼次数', fmt(u.total_fishing_count)], ['总重量', `${fmt(u.total_weight_caught)} g`], ['鱼塘容量', fmt(u.fish_pond_capacity)],
         ['当前区域', `#${u.fishing_zone_id}`], ['自动钓鱼', u.auto_fishing_enabled ? '已开启' : '已关闭'],
         ['装备鱼竿', d.equipped_rod ? `${d.equipped_rod.name} +${d.equipped_rod.refine_level}` : '无'], ['装备饰品', d.equipped_accessory ? `${d.equipped_accessory.name} +${d.equipped_accessory.refine_level}` : '无'],
-        ['当前称号', d.current_title || '无'], ['连续签到', `${fmt(u.consecutive_login_days)} 天`], ['注册时间', time(u.created_at)], ['最后签到', time(u.last_login_time)],
-        ['被代理', d.impersonated_by?.length ? d.impersonated_by.join('、') : '无']].map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}
+        ['当前称号', d.current_title || '无'], ['连续签到', `${fmt(u.consecutive_login_days)} 天`], ['注册时间', time(u.created_at)], ['最后签到', time(u.last_login_time)]].map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}
     </dl>
     <div class="modal-section">称号</div><div class="list-card">${titleRows}</div>
     <div class="form-grid" style="margin-top:12px">${selectField({ name: 'title_name', label: '授予称号', choices: titleChoices, cls: 'full' })}</div>`,
@@ -782,8 +780,6 @@ function titleFormBody(t = {}) {
 // ---------------------------------------------------------------------------
 
 function opsView() {
-  const imp = state.data.impersonation?.rows || [];
-  const impRows = imp.map(r => `<tr><td>${esc(r.admin_id)}</td><td><strong>${esc(r.target_nickname || '未知玩家')}</strong><span class="cell-sub">${esc(r.target_id)}</span></td><td>${rowActions([act('结束代理', 'imp-stop', { id: r.admin_id }, true)])}</td></tr>`);
   return shell('全服操作', '原管理员指令对应的批量操作。系统账号（如市场托管）不参与。', `<div class="stack">
     <section class="grid two">
       <div class="panel"><h3>全体货币</h3><p>给所有玩家发放或扣除金币、高级货币。扣除时余额不足的扣到 0。</p>
@@ -795,14 +791,10 @@ function opsView() {
       <div class="panel"><h3>全体发放物品</h3><p>给所有玩家发放同一种物品。</p>
         <form data-form="broadcast-item" novalidate>${itemPickerFields()}<div class="form-actions" style="margin-top:16px"><button type="submit" class="btn primary">发放</button></div></form></div>
     </section>
-    <section class="grid two">
-      <div class="panel"><h3>数据维护</h3>
-        <div class="list-card">
-          <div class="row"><div><h4>同步初始设定</h4><p>按插件内置数据补齐缺失的物品、商店与卡池，不会删除已有内容。</p></div><button type="button" class="btn tonal" data-action="sync">同步</button></div>
-        </div></div>
-      <div class="panel"><h3>代理玩家</h3><p>开启后，该账号在聊天中发送的游戏指令会以目标玩家的身份执行。重载插件后自动失效。</p>
-        <form data-form="imp-start" novalidate><div class="form-grid">${field({ name: 'admin_id', label: '你的账号 ID', required: true, placeholder: '例如你的 QQ 号' })}${field({ name: 'target_id', label: '目标玩家 ID', required: true })}</div><div class="form-actions" style="margin-top:16px"><button type="submit" class="btn primary">开始代理</button></div></form>
-        <div style="margin-top:16px">${table(['账号', '代理的玩家', '操作'], impRows, '当前没有进行中的代理。')}</div></div>
+    <section class="panel"><h3>数据维护</h3>
+      <div class="list-card">
+        <div class="row"><div><h4>同步初始设定</h4><p>按插件内置数据补齐缺失的物品、商店与卡池，不会删除已有内容。</p></div><button type="button" class="btn tonal" data-action="sync">同步</button></div>
+      </div>
     </section>
   </div>`);
 }
@@ -930,7 +922,6 @@ const ACTIONS = {
   'broadcast-currency': () => openBroadcastDialog('currency'),
   'broadcast-item': () => openBroadcastDialog('item'),
   sync: () => confirmAction({ title: '同步初始设定', message: '按插件内置数据补齐缺失的物品、商店与卡池吗？已有内容不会被删除。', label: '同步', danger: false, run: async () => { const r = await post('ops/sync'); await loadCatalog(); await refresh(); return r; } }),
-  'imp-stop': b => confirmAction({ title: '结束代理', message: `结束账号 ${b.dataset.id} 的代理吗？`, label: '结束代理', run: async () => { const r = await post('ops/impersonation/stop', { admin_id: b.dataset.id }); await refresh(); return r; } }),
 };
 
 // 表单提交：返回 {message} 时关闭对话框并提示
@@ -953,7 +944,6 @@ const FORMS = {
   title: (v, d) => post('titles/save', { ...v, title_id: d.titleId || '' }),
   'broadcast-currency': v => post('broadcast/currency', v),
   'broadcast-item': v => post('broadcast/item', v),
-  'imp-start': v => post('ops/impersonation/start', v),
 };
 // 改动模板、称号、区域后，物品下拉要跟着更新
 const CATALOG_FORMS = new Set(['template', 'title', 'zone', 'user-create']);
