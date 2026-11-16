@@ -2,13 +2,11 @@
 
 <img src="https://raw.githubusercontent.com/yiyinfaith/astrbot_plugin_fishing/main/logo.png" width="96" alt="全能钓鱼">
 
-AstrBot 钓鱼养成游戏：钓鱼、鱼塘与水族箱、装备精炼、商店、玩家市场、抽卡、偷鱼与电鱼、称号成就。基于 [Akiyo-dayo/astrbot_plugin_fishing](https://github.com/Akiyo-dayo/astrbot_plugin_fishing) v2.6.5 二次开发。
+AstrBot 钓鱼养成游戏：钓鱼、鱼塘与水族箱、装备精炼、商店、玩家市场、抽卡、偷鱼与电鱼、称号成就。
 
 ## 安装
 
 在 AstrBot 插件市场安装，或把仓库放到 `data/plugins/astrbot_plugin_fishing` 后安装 `requirements.txt` 并重载插件。数据保存在 `data/plugin_data/astrbot_plugin_fishing/fish.db`，首次启动时自动建库。
-
-本插件不兼容原插件和旧版本的存档：启动时如果发现旧版 `fish.db`，会把它改名为 `fish.db.legacy-<时间>` 留作备份，然后新建空库。
 
 ## 指令
 
