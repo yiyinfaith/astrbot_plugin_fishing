@@ -1,6 +1,5 @@
 from typing import Dict, Any
 from PIL import Image, ImageDraw, ImageFont
-from .utils import get_user_avatar
 from .styles import (
     COLOR_SUCCESS, COLOR_WARNING, COLOR_ERROR, COLOR_LOCK,
     COLOR_GOLD, COLOR_RARE, COLOR_REFINE_RED, COLOR_REFINE_ORANGE,
@@ -82,7 +81,7 @@ def calculate_dynamic_height(user_data: Dict[str, Any]) -> int:
     total_height = base_height + rod_height + accessory_height + bait_height + item_height + section_spacing
     return max(total_height, 600)  # 最小高度600
 
-async def draw_backpack_image(user_data: Dict[str, Any], data_dir: str) -> Image.Image:
+def draw_backpack_image(user_data: Dict[str, Any], avatar_image: Image.Image | None) -> Image.Image:
     """
     背包图片生成的实际实现
     """
@@ -270,18 +269,14 @@ async def draw_backpack_image(user_data: Dict[str, Any], data_dir: str) -> Image
     avatar_size = 60
     col1_x_with_avatar = col1_x_without_avatar + avatar_size + 20  # 有头像时偏移
     col1_x = col1_x_without_avatar # 默认无头像
-    col2_x = col1_x + 300 # 第二列位置（初始，若头像改变后会重算）
     
     # 行位置
     row1_y = current_y + 12
     row2_y = current_y + 52
 
-    # 绘制用户头像 - 如有
-    if user_id := user_data.get('user_id'):
-        if avatar_image := await get_user_avatar(user_id, data_dir, avatar_size):
-            image.paste(avatar_image, (col1_x, row1_y), avatar_image)
-            col1_x = col1_x_with_avatar # 更新 col1_x 以适应头像位置
-            col2_x = col1_x + 300  # 头像存在时，第二列起点随之右移
+    if avatar_image is not None:
+        image.paste(avatar_image, (col1_x, row1_y), avatar_image)
+        col1_x = col1_x_with_avatar
 
     # 用户昵称
     nickname = user_data.get('nickname', '未知用户')
@@ -295,33 +290,8 @@ async def draw_backpack_image(user_data: Dict[str, Any], data_dir: str) -> Image
     baits_count = user_data.get('total_baits', len(user_data.get('baits', [])))
     items_count = user_data.get('total_items', len(user_data.get('items', [])))
     
-    # 计算总价值（基于显示的物品）
-    total_value = 0
-    for rod in user_data.get('rods', []):
-        rarity = rod.get('rarity', 1)
-        refine_level = rod.get('refine_level', 1)
-        base_value = rarity * 1000
-        refined_value = base_value * (1 + max(refine_level - 1, 0) * 0.5)
-        total_value += refined_value
-    for accessory in user_data.get('accessories', []):
-        rarity = accessory.get('rarity', 1)
-        refine_level = accessory.get('refine_level', 1)
-        base_value = rarity * 1000
-        refined_value = base_value * (1 + max(refine_level - 1, 0) * 0.5)
-        total_value += refined_value
-    for bait in user_data.get('baits', []):
-        rarity = bait.get('rarity', 1)
-        quantity = bait.get('quantity', 0)
-        base_value = rarity * 100
-        total_value += base_value * quantity
-    for item in user_data.get('items', []):
-        rarity = item.get('rarity', 1)
-        quantity = item.get('quantity', 0)
-        base_value = rarity * 100
-        total_value += base_value * quantity
-    
     stats_text = f"鱼竿: {rods_count} | 饰品: {accessories_count} | 鱼饵: {baits_count} | 道具: {items_count}"
-    value_text = f"装备总价值: {int(total_value):,} 金币"
+    value_text = f"装备总价值: {user_data['total_value']:,} 金币"
     stats_w, stats_h = get_text_size(stats_text, small_font)
     value_w, value_h = get_text_size(value_text, small_font)
     gap = 24
@@ -339,8 +309,9 @@ async def draw_backpack_image(user_data: Dict[str, Any], data_dir: str) -> Image
     # 鱼竿区域
     rods = user_data.get('rods', [])
     rod_section_y = current_y
-    draw.text((30, rod_section_y), "鱼竿", font=subtitle_font, fill=primary_medium)
-    current_y += 35
+    if rods or not rods_count:
+        draw.text((30, rod_section_y), "鱼竿", font=subtitle_font, fill=primary_medium)
+        current_y += 35
 
     if rods:
         # 计算鱼竿卡片布局 - 每行2个（动态高度）
@@ -476,16 +447,17 @@ async def draw_backpack_image(user_data: Dict[str, Any], data_dir: str) -> Image
         
         # 更新当前Y位置到下一行起点
         current_y = next_row_start_y
-    else:
-        draw.text((30, current_y), "本页无鱼竿", font=content_font, fill=text_muted)
+    elif not rods_count:
+        draw.text((30, current_y), "暂无鱼竿", font=content_font, fill=text_muted)
         current_y += 50
 
     current_y += 20
 
     # 饰品区域
     accessories = user_data.get('accessories', [])
-    draw.text((30, current_y), "饰品", font=subtitle_font, fill=primary_medium)
-    current_y += 35
+    if accessories or not accessories_count:
+        draw.text((30, current_y), "饰品", font=subtitle_font, fill=primary_medium)
+        current_y += 35
 
     if accessories:
         # 计算饰品卡片布局 - 每行2个（动态高度）
@@ -594,16 +566,17 @@ async def draw_backpack_image(user_data: Dict[str, Any], data_dir: str) -> Image
         
         # 更新当前Y位置
         current_y = next_row_start_y
-    else:
-        draw.text((30, current_y), "本页无饰品", font=content_font, fill=text_muted)
+    elif not accessories_count:
+        draw.text((30, current_y), "暂无饰品", font=content_font, fill=text_muted)
         current_y += 50
 
     current_y += 20
 
     # 鱼饵区域
     baits = user_data.get('baits', [])
-    draw.text((30, current_y), "鱼饵", font=subtitle_font, fill=primary_medium)
-    current_y += 35
+    if baits or not baits_count:
+        draw.text((30, current_y), "鱼饵", font=subtitle_font, fill=primary_medium)
+        current_y += 35
 
     if baits:
         # 计算鱼饵卡片布局 - 每行2个（动态高度）
@@ -682,16 +655,17 @@ async def draw_backpack_image(user_data: Dict[str, Any], data_dir: str) -> Image
         
         # 更新当前Y位置
         current_y = next_row_start_y
-    else:
-        draw.text((30, current_y), "本页无鱼饵", font=content_font, fill=text_muted)
+    elif not baits_count:
+        draw.text((30, current_y), "暂无鱼饵", font=content_font, fill=text_muted)
         current_y += 50
 
     current_y += 20
 
     # 道具区域
     items = user_data.get('items', [])
-    draw.text((30, current_y), "道具", font=subtitle_font, fill=primary_medium)
-    current_y += 35
+    if items or not items_count:
+        draw.text((30, current_y), "道具", font=subtitle_font, fill=primary_medium)
+        current_y += 35
 
     if items:
         # 计算道具卡片布局 - 每行2个（动态高度）
@@ -756,21 +730,13 @@ async def draw_backpack_image(user_data: Dict[str, Any], data_dir: str) -> Image
                     for line_idx, line in enumerate(lines[:max_lines]):
                         draw.text((x + 15, next_y + line_idx * line_h), line, font=tiny_font, fill=text_secondary)
         current_y = next_row_start_y
-    else:
-        draw.text((30, current_y), "本页无道具", font=content_font, fill=text_muted)
+    elif not items_count:
+        draw.text((30, current_y), "暂无道具", font=content_font, fill=text_muted)
         current_y += 50
 
     current_y += 20
 
-    page = user_data["page"]
-    page_count = user_data["page_count"]
-    footer_text = f"第 {page} / {page_count} 页"
-    if page < page_count:
-        footer_text += f" · 钓鱼背包 {page + 1} 查看下一页"
-    footer_w, footer_h = get_text_size(footer_text, small_font)
-    footer_x = (width - footer_w) // 2
-    # 如果超出原始高度，则扩展画布
-    needed_height = current_y + footer_h + 30
+    needed_height = current_y + 30
     if needed_height > height:
         # 扩展画布高度
         new_image = Image.new('RGB', (width, needed_height), (255, 255, 255))
@@ -781,7 +747,6 @@ async def draw_backpack_image(user_data: Dict[str, Any], data_dir: str) -> Image
         image = new_image
         draw = ImageDraw.Draw(image)
         height = needed_height
-    draw.text((footer_x, current_y), footer_text, font=small_font, fill=text_secondary)
 
     # 添加装饰性元素
     corner_size = 15
@@ -796,22 +761,11 @@ async def draw_backpack_image(user_data: Dict[str, Any], data_dir: str) -> Image
     return image
 
 
-def get_user_backpack_data(inventory_service, user_id: str, page: int = 1) -> Dict[str, Any]:
-    """为每类物品取同一页，保留库存服务的排列顺序。"""
-    page_size = 12
-    inventories = {
+def get_user_backpack_data(inventory_service, user_id: str) -> Dict[str, Any]:
+    """读取背包的所有物品，并保留装备的排序。"""
+    return {
         "rods": inventory_service.get_user_rod_inventory(user_id)["rods"],
         "accessories": inventory_service.get_user_accessory_inventory(user_id)["accessories"],
         "baits": sorted(inventory_service.get_user_bait_inventory(user_id)["baits"], key=lambda item: item["bait_id"]),
         "items": sorted(inventory_service.get_user_item_inventory(user_id)["items"], key=lambda item: item["item_id"]),
-    }
-    totals = {category: len(items) for category, items in inventories.items()}
-    page_count = max(1, (max(totals.values()) + page_size - 1) // page_size)
-    start = (page - 1) * page_size
-    return {
-        "user_id": user_id,
-        "page": page,
-        "page_count": page_count,
-        **{f"total_{category}": count for category, count in totals.items()},
-        **{category: items[start:start + page_size] for category, items in inventories.items()},
     }

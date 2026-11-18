@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta, timezone
 from astrbot.api import logger
 # 导入抽象基类和领域模型
 from .abstract_repository import AbstractLogRepository
-from ..domain.models import GachaRecord, UserFishStat
+from ..domain.models import UserFishStat
 
 class SqliteLogRepository(AbstractLogRepository):
     """日志类数据仓储的SQLite实现"""
@@ -30,71 +30,6 @@ class SqliteLogRepository(AbstractLogRepository):
             return None
         data = dict(row)
         return UserFishStat(**data)
-
-    def _row_to_gacha_record(self, row: sqlite3.Row) -> Optional[GachaRecord]:
-        if not row:
-            return None
-        return GachaRecord(**row)
-
-    # --- Gacha Log Methods ---
-    def add_gacha_record(self, record: GachaRecord) -> None:
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            # 1) 写入抽卡记录
-            cursor.execute(
-                """
-                INSERT INTO gacha_records (
-                    user_id, gacha_pool_id, item_type, item_id,
-                    item_name, quantity, rarity, timestamp
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    record.user_id,
-                    record.gacha_pool_id,
-                    record.item_type,
-                    record.item_id,
-                    record.item_name,
-                    record.quantity,
-                    record.rarity,
-                    record.timestamp or datetime.now(self.UTC8),
-                ),
-            )
-
-            # 2) 仅保留当前用户最近10条抽卡记录
-            cursor.execute(
-                """
-                DELETE FROM gacha_records
-                WHERE user_id = ?
-                  AND record_id NOT IN (
-                    SELECT record_id FROM gacha_records
-                    WHERE user_id = ?
-                    ORDER BY timestamp DESC, record_id DESC
-                    LIMIT 50
-                  )
-                """,
-                (record.user_id, record.user_id),
-            )
-
-            # 3) 清理30天前的抽卡记录（全局）
-            cutoff_time = datetime.now(self.UTC8) - timedelta(days=30)
-            cursor.execute(
-                """
-                DELETE FROM gacha_records
-                WHERE timestamp < ?
-                """,
-                (cutoff_time,),
-            )
-
-            conn.commit()
-
-    def get_gacha_records(self, user_id: str, limit: int) -> List[GachaRecord]:
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM gacha_records
-                WHERE user_id = ? ORDER BY timestamp DESC LIMIT ?
-            """, (user_id, limit))
-            return [self._row_to_gacha_record(row) for row in cursor.fetchall()]
 
     # --- Check-in Log Methods ---
     def add_check_in(self, user_id: str, check_in_date: date) -> None:
@@ -145,25 +80,6 @@ class SqliteLogRepository(AbstractLogRepository):
     def add_log(self, user_id: str, log_type: str, message: str) -> None:
         """记录一条通用事件日志（只写入 AstrBot 日志，不落库）。"""
         logger.info(f"[钓鱼][{log_type}] {user_id}: {message}")
-
-    def get_gacha_records_count_today(
-        self, user_id: str, gacha_pool_id: int
-    ) -> int:
-        # 获取 UTC+8 的今天的开始和结束时间点
-        today_start_utc8 = datetime.now(self.UTC8).replace(hour=0, minute=0, second=0, microsecond=0)
-        today_end_utc8 = today_start_utc8 + timedelta(days=1)
-
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT COUNT(*) FROM gacha_records
-                WHERE user_id = ? AND gacha_pool_id = ? AND timestamp >= ? AND timestamp < ?
-                """,
-                (user_id, gacha_pool_id, today_start_utc8, today_end_utc8),
-            )
-            result = cursor.fetchone()
-            return result[0] if result else 0
 
     # --- 用户鱼类统计（用于图鉴与个人纪录） ---
     def get_user_fish_stats(self, user_id: str) -> List[UserFishStat]:

@@ -167,8 +167,7 @@ class FishingPlugin(Star):
                                                           self.item_template_repo, self.buff_repo, self.game_config)
 
         # 3.3 实例化其他核心服务
-        self.gacha_service = GachaService(self.gacha_repo, self.user_repo, self.inventory_repo, self.item_template_repo,
-                                         self.log_repo)
+        self.gacha_service = GachaService(self.gacha_repo, self.user_repo, self.inventory_repo, self.item_template_repo)
         # UserService 依赖 GachaService，因此在 GachaService 之后实例化
         self.user_service = UserService(self.user_repo, self.log_repo, self.inventory_repo, self.item_template_repo, self.gacha_service, self.game_config)
         self.inventory_service = InventoryService(
@@ -321,7 +320,7 @@ class FishingPlugin(Star):
 
     @filter.command("钓鱼背包")
     async def user_backpack(self, event: AstrMessageEvent):
-        """分页查看鱼竿、饰品、鱼饵和道具。用法：钓鱼背包 [页码]"""
+        """一次查看全部鱼竿、饰品、鱼饵和道具"""
         async for r in self._guard(event, inventory_handlers.user_backpack(self, event)):
             yield r
 
@@ -438,37 +437,31 @@ class FishingPlugin(Star):
 
     # =========== 市场与商店 ==========
 
-    @filter.command("全部卖出", alias={"全部出售", "卖出全部", "出售全部", "清空鱼"})
+    @filter.command("卖出所有鱼")
     async def sell_all(self, event: AstrMessageEvent):
         """卖出鱼塘中所有的鱼，换取金币"""
         async for r in self._guard(event, market_handlers.sell_all(self, event)):
             yield r
 
-    @filter.command("保留卖出", alias={"保留出售", "卖出保留", "出售保留"})
-    async def sell_keep(self, event: AstrMessageEvent):
-        """卖出鱼塘中的鱼，但保留指定数量。用法：保留卖出 保留数量"""
-        async for r in self._guard(event, market_handlers.sell_keep(self, event)):
-            yield r
-
-    @filter.command("砸锅卖铁", alias={"破产", "清空"})
+    @filter.command("卖出所有家产")
     async def sell_everything(self, event: AstrMessageEvent):
         """卖掉所有可以出售的物品，包括鱼、装备等"""
         async for r in self._guard(event, market_handlers.sell_everything(self, event)):
             yield r
 
-    @filter.command("出售稀有度", alias={"稀有度出售", "出售星级"})
+    @filter.command("卖出稀有度鱼")
     async def sell_by_rarity(self, event: AstrMessageEvent):
-        """按稀有度出售鱼。用法：出售稀有度 星级"""
+        """按稀有度卖鱼。用法：卖出稀有度鱼 星级 [更多星级]"""
         async for r in self._guard(event, market_handlers.sell_by_rarity(self, event)):
             yield r
 
-    @filter.command("出售所有鱼竿", alias={"出售全部鱼竿", "卖出所有鱼竿", "卖出全部鱼竿", "清空鱼竿"})
+    @filter.command("卖出所有鱼竿")
     async def sell_all_rods(self, event: AstrMessageEvent):
         """出售所有未装备且未锁定的鱼竿"""
         async for r in self._guard(event, market_handlers.sell_all_rods(self, event)):
             yield r
 
-    @filter.command("出售所有饰品", alias={"出售全部饰品", "卖出所有饰品", "卖出全部饰品", "清空饰品"})
+    @filter.command("卖出所有饰品")
     async def sell_all_accessories(self, event: AstrMessageEvent):
         """出售所有未装备且未锁定的饰品"""
         async for r in self._guard(event, market_handlers.sell_all_accessories(self, event)):
@@ -534,12 +527,6 @@ class FishingPlugin(Star):
     async def view_gacha_pool(self, event: AstrMessageEvent):
         """查看当前卡池中的所有物品及其概率"""
         async for r in self._guard(event, gacha_handlers.view_gacha_pool(self, event)):
-            yield r
-
-    @filter.command("抽卡记录")
-    async def gacha_history(self, event: AstrMessageEvent):
-        """查看你的抽卡历史记录"""
-        async for r in self._guard(event, gacha_handlers.gacha_history(self, event)):
             yield r
 
     # =========== 社交 ==========

@@ -121,6 +121,8 @@ def install(data_root: Path) -> None:
     components.Image = _Comp
     components.At = _Comp
     components.Plain = _Comp
+    components.Node = _Comp
+    components.Nodes = _Comp
 
     web = types.ModuleType("astrbot.api.web")
     web.request = None

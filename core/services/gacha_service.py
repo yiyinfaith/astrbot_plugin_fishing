@@ -9,10 +9,9 @@ from ..repositories.abstract_repository import (
     AbstractUserRepository,
     AbstractInventoryRepository,
     AbstractItemTemplateRepository,
-    AbstractLogRepository,
 )
-from ..domain.models import GachaPool, GachaPoolItem, GachaRecord
-from ..utils import get_now
+from ..domain.models import GachaPool, GachaPoolItem
+from ..utils import get_now, get_today
 
 
 def _perform_single_weighted_draw(pool: GachaPool) -> GachaPoolItem:
@@ -37,13 +36,11 @@ class GachaService:
         user_repo: AbstractUserRepository,
         inventory_repo: AbstractInventoryRepository,
         item_template_repo: AbstractItemTemplateRepository,
-        log_repo: AbstractLogRepository,
     ):
         self.gacha_repo = gacha_repo
         self.user_repo = user_repo
         self.inventory_repo = inventory_repo
         self.item_template_repo = item_template_repo
-        self.log_repo = log_repo
 
     def get_all_pools(self) -> Dict[str, Any]:
         """提供查看所有卡池信息的功能。"""
@@ -125,18 +122,9 @@ class GachaService:
 
         # 每日免费池限制检查
         free_pool = self.get_daily_free_pool()
-        if free_pool and pool_id == free_pool.gacha_pool_id:
-            if num_draws > 1:
-                return {"success": False, "message": "每日免费补给一次只能抽一张哦！"}
-
-            draws_today = self.log_repo.get_gacha_records_count_today(
-                user_id, free_pool.gacha_pool_id
-            )
-            if draws_today >= 1:
-                return {
-                    "success": False,
-                    "message": "今天的免费补给已经领过啦，明天再来吧！",
-                }
+        is_daily_supply = free_pool is not None and pool_id == free_pool.gacha_pool_id
+        if is_daily_supply and num_draws > 1:
+            return {"success": False, "message": "每日免费补给一次只能抽一张哦！"}
 
         # 限时卡池过期校验
         try:
@@ -176,14 +164,24 @@ class GachaService:
         if not draw_results:
             return {"success": False, "message": "抽卡失败，请检查卡池配置"}
 
-        # 2. 扣除费用
-        user.coins -= total_coin_cost
-        self.user_repo.update(user)
+        # 2. 领取每日补给或扣除金币
+        claim_date = get_today() if is_daily_supply else None
+        if claim_date is not None:
+            if not self.gacha_repo.claim_daily_supply(user_id, pool_id, claim_date):
+                return {"success": False, "message": "今天的免费补给已经领过啦，明天再来吧！"}
+        elif total_coin_cost:
+            user.coins -= total_coin_cost
+            self.user_repo.update(user)
 
-        # 3. 发放奖励并记录日志
+        # 3. 发放奖励
         granted_rewards = []
         for item in draw_results:
-            self._grant_reward(user_id, item)
+            try:
+                self._grant_reward(user_id, item)
+            except Exception:
+                if claim_date is not None:
+                    self.gacha_repo.release_daily_supply(user_id, pool_id, claim_date)
+                raise
             # 将抽奖结果 => 转换为用户可见的奖励格式
             if item.item_type == "rod":
                 get_rod = self.item_template_repo.get_rod_by_id(item.item_id)
@@ -228,11 +226,7 @@ class GachaService:
         return {"success": True, "results": granted_rewards}
 
     def _grant_reward(self, user_id: str, item: GachaPoolItem):
-        """根据抽到的物品，为用户发放具体奖励并记录日志。"""
-        item_name = "未知物品"
-        item_rarity = 1
-        template = None
-
+        """发放抽到的奖励。"""
         if item.item_type == "rod":
             # 新获得的鱼竿应使用模板耐久度（允许为0；None代表无上限/未定义）
             template = self.item_template_repo.get_rod_by_id(item.item_id)
@@ -240,40 +234,13 @@ class GachaService:
             self.inventory_repo.add_rod_instance(user_id, item.item_id, durability)
         elif item.item_type == "accessory":
             self.inventory_repo.add_accessory_instance(user_id, item.item_id)
-            template = self.item_template_repo.get_accessory_by_id(item.item_id)
         elif item.item_type == "bait":
             self.inventory_repo.update_bait_quantity(user_id, item.item_id, item.quantity)
-            template = self.item_template_repo.get_bait_by_id(item.item_id)
         elif item.item_type == "item":
             self.inventory_repo.update_item_quantity(
                 user_id, item.item_id, item.quantity
             )
-            template = self.item_template_repo.get_by_id(item.item_id)
         elif item.item_type == "coins":
             user = self.user_repo.get_by_id(user_id)
             user.coins += item.quantity
             self.user_repo.update(user)
-            item_name = f"{item.quantity} 金币"
-
-        if template:
-            item_name = template.name
-            item_rarity = template.rarity if hasattr(template, "rarity") else 1
-
-        # 记录日志
-        log_entry = GachaRecord(
-            record_id=0, # DB自增
-            user_id=user_id,
-            gacha_pool_id=item.gacha_pool_id,
-            item_type=item.item_type,
-            item_id=item.item_id,
-            item_name=item_name,
-            quantity=item.quantity,
-            rarity=item_rarity,
-            timestamp=get_now()
-        )
-        self.log_repo.add_gacha_record(log_entry)
-
-    def get_user_gacha_history(self, user_id: str, limit: int = 10) -> Dict[str, Any]:
-        """提供查询抽卡历史记录的功能。"""
-        records = self.log_repo.get_gacha_records(user_id, limit)
-        return {"success": True, "records": records}

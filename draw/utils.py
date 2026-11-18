@@ -7,10 +7,14 @@ from astrbot.api import logger
 from astrbot.api.message_components import Image as MessageImage
 
 
-def image_result(event, image: Image.Image):
+def image_component(image: Image.Image) -> MessageImage:
     with BytesIO() as buffer:
         image.save(buffer, format="PNG")
-        return event.chain_result([MessageImage.fromBytes(buffer.getvalue())])
+        return MessageImage.fromBytes(buffer.getvalue())
+
+
+def image_result(event, image: Image.Image):
+    return event.chain_result([image_component(image)])
 
 async def get_user_avatar(user_id: str, data_dir: str, avatar_size: int = 50) -> Optional[Image.Image]:
     """

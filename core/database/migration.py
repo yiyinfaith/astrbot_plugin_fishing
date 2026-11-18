@@ -6,7 +6,7 @@ import sqlite3
 from astrbot.api import logger
 
 # 与 migrations/001_initial_schema.py 中的 SCHEMA_MARK 保持一致
-SCHEMA_MARK = "fishing-1.0.0"
+SCHEMA_MARK = "fishing-1.0.1"
 
 
 def get_current_version(cursor: sqlite3.Cursor) -> int:

@@ -1,4 +1,4 @@
-"""1.0.0 数据库结构。
+"""1.0.1 数据库结构。
 
 全新安装时一次建好所有表、索引和必要的初始数据（钓鱼区域、水族箱升级档位）。
 鱼类、装备、道具、商店、卡池等游戏内容由 DataSetupService 写入。
@@ -6,7 +6,7 @@
 
 import sqlite3
 
-SCHEMA_MARK = "fishing-1.0.0"
+SCHEMA_MARK = "fishing-1.0.1"
 
 TABLES = [
     """
@@ -282,16 +282,11 @@ TABLES = [
     )
     """,
     """
-    CREATE TABLE IF NOT EXISTS gacha_records (
-        record_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    CREATE TABLE IF NOT EXISTS daily_supply_claims (
         user_id TEXT NOT NULL,
         gacha_pool_id INTEGER NOT NULL,
-        item_type TEXT NOT NULL,
-        item_id INTEGER NOT NULL,
-        item_name TEXT NOT NULL,
-        quantity INTEGER DEFAULT 1,
-        rarity INTEGER DEFAULT 1,
-        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+        claim_date TEXT NOT NULL,
+        PRIMARY KEY (user_id, gacha_pool_id),
         FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
         FOREIGN KEY (gacha_pool_id) REFERENCES gacha_pools(gacha_pool_id) ON DELETE CASCADE
     )
@@ -406,7 +401,6 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_user_fish_stats_fish ON user_fish_stats(fish_id)",
     "CREATE INDEX IF NOT EXISTS idx_aquarium_upgrades_level ON aquarium_upgrades(level)",
     "CREATE INDEX IF NOT EXISTS idx_gacha_pool_items_pool_type ON gacha_pool_items(gacha_pool_id, item_type)",
-    "CREATE INDEX IF NOT EXISTS idx_gacha_records_user_time ON gacha_records(user_id, timestamp)",
     "CREATE INDEX IF NOT EXISTS idx_market_user_item_quality ON market(user_id, item_type, item_id, quality_level)",
     "CREATE INDEX IF NOT EXISTS idx_market_item_quality ON market(item_type, item_id, quality_level)",
     "CREATE INDEX IF NOT EXISTS idx_shops_active_time ON shops(is_active, start_time, end_time)",

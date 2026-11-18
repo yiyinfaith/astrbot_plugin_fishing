@@ -139,7 +139,6 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
         self,
         user_id: str,
         rarities: Optional[List[int]] = None,
-        keep_one: bool = False,
     ) -> Dict[str, Any]:
         """在一个事务内统计并删除鱼，同时原子增加用户金币。"""
         rarity_values = sorted(set(rarities or []))
@@ -154,11 +153,10 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
             cursor = conn.cursor()
             cursor.execute("BEGIN IMMEDIATE")
             try:
-                quantity_expr = "MAX(ufi.quantity - 1, 0)" if keep_one else "ufi.quantity"
                 cursor.execute(f"""
                     SELECT f.rarity, ufi.quality_level,
-                           SUM({quantity_expr}) AS quantity,
-                           SUM({quantity_expr} * f.base_value * (1 + ufi.quality_level)) AS value
+                           SUM(ufi.quantity) AS quantity,
+                           SUM(ufi.quantity * f.base_value * (1 + ufi.quality_level)) AS value
                     FROM user_fish_inventory ufi
                     JOIN fish f ON ufi.fish_id = f.fish_id
                     WHERE ufi.user_id = ?{rarity_clause}
@@ -182,17 +180,10 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
                     )
                     mutation_params.extend(rarity_values)
 
-                if keep_one:
-                    cursor.execute(
-                        f"UPDATE user_fish_inventory SET quantity = 1 "
-                        f"WHERE user_id = ? AND quantity > 1{mutation_filter}",
-                        tuple(mutation_params),
-                    )
-                else:
-                    cursor.execute(
-                        f"DELETE FROM user_fish_inventory WHERE user_id = ?{mutation_filter}",
-                        tuple(mutation_params),
-                    )
+                cursor.execute(
+                    f"DELETE FROM user_fish_inventory WHERE user_id = ?{mutation_filter}",
+                    tuple(mutation_params),
+                )
 
                 cursor.execute(
                     """

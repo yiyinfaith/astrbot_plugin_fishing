@@ -1,7 +1,8 @@
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
-from astrbot.core.message.components import At
-from ..draw.utils import image_result
+from astrbot.api.message_components import At, Node, Nodes, Plain
+from ..draw.backpack import draw_backpack_image, get_user_backpack_data
+from ..draw.utils import get_user_avatar, image_component
 from ..utils import format_rarity_display, parse_amount
 from typing import TYPE_CHECKING
 
@@ -10,50 +11,67 @@ if TYPE_CHECKING:
 
 
 async def user_backpack(plugin: "FishingPlugin", event: AstrMessageEvent):
-    """分页查看鱼竿、饰品、鱼饵和道具。"""
+    """用一条消息查看所有鱼竿、饰品、鱼饵和道具。"""
     user_id = plugin._get_effective_user_id(event)
     user = plugin.user_repo.get_by_id(user_id)
     if not user:
         yield event.plain_result("❌ 您还没有注册，请先发送「钓鱼注册」。")
         return
 
-    args = event.message_str.split()
-    try:
-        page = int(args[1]) if len(args) == 2 else 1
-    except ValueError:
-        page = 0
-    if len(args) > 2 or page < 1:
-        yield event.plain_result("❌ 用法：钓鱼背包 [页码]，页码为正整数。")
+    if len(event.message_str.split()) > 1:
+        yield event.plain_result("请直接发送「钓鱼背包」查看全部物品。")
         return
 
-    from ..draw.backpack import draw_backpack_image, get_user_backpack_data
+    backpack = get_user_backpack_data(plugin.inventory_service, user_id)
+    nickname = user.nickname or user_id
+    categories = {"rods": "鱼竿", "accessories": "饰品", "baits": "鱼饵", "items": "道具"}
+    totals = {f"total_{category}": len(entries) for category, entries in backpack.items()}
+    total_value = sum(
+        item["rarity"] * 1000 * (1 + max(item["refine_level"] - 1, 0) * 0.5)
+        for category in ("rods", "accessories") for item in backpack[category]
+    ) + sum(
+        item["rarity"] * 100 * item["quantity"]
+        for category in ("baits", "items") for item in backpack[category]
+    )
+    summary = {**totals, "total_value": int(total_value), "nickname": nickname}
+    avatar = await get_user_avatar(user_id, plugin.data_dir, 60)
 
-    backpack = get_user_backpack_data(plugin.inventory_service, user_id, page)
-    if page > backpack["page_count"]:
-        yield event.plain_result(f"❌ 背包只有 {backpack['page_count']} 页。")
-        return
-    backpack["nickname"] = user.nickname or user_id
-    try:
-        image = await draw_backpack_image(backpack, plugin.data_dir)
-        yield image_result(event, image)
-    except Exception:
-        logger.exception("生成钓鱼背包图片失败")
-        lines = [f"【钓鱼背包】第 {page} / {backpack['page_count']} 页"]
-        for category, label in (("rods", "鱼竿"), ("accessories", "饰品"), ("baits", "鱼饵"), ("items", "道具")):
-            lines.append(f"\n{label}")
-            for item in backpack[category]:
-                if category == "baits":
-                    code = f"B{item['bait_id']}"
-                elif category == "items":
-                    code = f"D{item['item_id']}"
-                else:
-                    code = item["display_code"]
-                quantity = f" ×{item['quantity']}" if "quantity" in item else ""
-                equipped = "（装备中）" if item.get("is_equipped") or item.get("is_current") else ""
-                lines.append(f"{code} {item['name']}{quantity}{equipped}")
-            if not backpack[category]:
-                lines.append("本页无物品")
-        yield event.plain_result("\n".join(lines))
+    supports_forward = event.get_platform_name() in {"aiocqhttp", "satori"}
+    longest_category = max(1, *(len(entries) for entries in backpack.values()))
+    # Limit attachment dimensions while keeping all cards in a single forward.
+    batch_size = 12 if supports_forward else longest_category
+    nodes = []
+    for start in range(0, longest_category, batch_size):
+        batch = {category: entries[start:start + batch_size] for category, entries in backpack.items()}
+        try:
+            image = draw_backpack_image({**batch, **summary}, avatar)
+            content = [image_component(image)]
+        except Exception:
+            logger.exception("生成钓鱼背包图片失败")
+            lines = [f"【{nickname}的钓鱼背包】"]
+            for category, items in batch.items():
+                if not items:
+                    continue
+                lines.append(f"\n{categories[category]}")
+                for item in items:
+                    suffix = f" ×{item['quantity']}" if "quantity" in item else ""
+                    if item.get("is_equipped"):
+                        suffix += "（装备中）"
+                    if item.get("is_locked"):
+                        suffix += "（已锁定）"
+                    code = item.get("display_code") or (
+                        f"B{item['bait_id']}" if category == "baits" else f"D{item['item_id']}"
+                    )
+                    lines.append(f"{code} {item['name']}{suffix}")
+            if len(lines) == 1:
+                lines.append("背包为空")
+            content = [Plain("\n".join(lines))]
+        if not supports_forward:
+            yield event.chain_result(content)
+            return
+        nodes.append(Node(uin=event.get_self_id(), name="钓鱼背包", content=content))
+
+    yield event.chain_result([Nodes(nodes)])
 
 
 async def pond(plugin: "FishingPlugin", event: AstrMessageEvent):
@@ -283,7 +301,7 @@ async def refine_help(plugin: "FishingPlugin", event: AstrMessageEvent):
 • /精炼鱼竿 [鱼竿ID]
 • /精炼饰品 [饰品ID]
 • 需要至少两件同模板装备（目标 + 材料）
-• 查看装备编号：钓鱼背包 [页码]
+• 查看装备编号：钓鱼背包
 
 """
 

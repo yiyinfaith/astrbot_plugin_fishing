@@ -211,23 +211,6 @@ class AquariumUpgrade:
     created_at: Optional[datetime] = None
 
 @dataclass
-class GachaRecord:
-    """一条抽卡记录"""
-    record_id: int
-    user_id: str
-    gacha_pool_id: int
-    item_type: str
-    item_id: int
-    item_name: str
-    timestamp: datetime
-    quantity: int = 1
-    rarity: int = 1
-
-    def __getitem__(self, item):
-        """允许通过属性名访问字段"""
-        return getattr(self, item)
-
-@dataclass
 class MarketListing:
     """一个市场商品条目"""
     market_id: int

@@ -245,18 +245,12 @@ class InventoryService:
             "items": enriched_items
         }
 
-    def sell_all_fish(self, user_id: str, keep_one: bool = False) -> Dict[str, Any]:
-        """
-        向系统出售鱼。
-
-        Args:
-            user_id: 用户ID
-            keep_one: 是否每种鱼保留一条
-        """
+    def sell_all_fish(self, user_id: str) -> Dict[str, Any]:
+        """向系统卖出鱼塘中所有的鱼。"""
         if not self.user_repo.check_exists(user_id):
             return {"success": False, "message": "用户不存在"}
 
-        sale = self.inventory_repo.sell_fish_atomic(user_id, keep_one=keep_one)
+        sale = self.inventory_repo.sell_fish_atomic(user_id)
         sold_value = sale["total_value"]
         if sold_value <= 0:
             return {"success": False, "message": "❌ 你没有可以卖出的鱼"}
@@ -359,7 +353,7 @@ class InventoryService:
 
     def sell_everything_except_locked(self, user_id: str) -> Dict[str, Any]:
         """
-        砸锅卖铁：出售所有未锁定且未装备的鱼竿、饰品和全部鱼类
+        卖出所有未锁定且未装备的鱼竿、饰品和鱼塘中的鱼
         保留当前装备的鱼竿和饰品，以及所有锁定的装备
         """
         user = self.user_repo.get_by_id(user_id)
@@ -405,7 +399,7 @@ class InventoryService:
 
         # 构造详细的结果消息
         grand_total = total_value + coins_from_bags
-        message = f"💥 砸锅卖铁完成！总共获得 {grand_total} 金币\n\n"
+        message = f"💰 卖出所有家产完成！总共获得 {grand_total} 金币\n\n"
         message += "📊 出售详情：\n"
         
         if sold_items["fish_count"] > 0:
@@ -427,7 +421,7 @@ class InventoryService:
     def _auto_consume_money_bags(self, user) -> int:
         """
         自动消耗所有“钱袋”类道具（effect_type == "ADD_COINS"），返回获得金币总数。
-        不产生单独消息，直接修改用户金币并统计总额，用于砸锅卖铁聚合展示。
+        直接修改用户金币，将钱袋收益计入卖出所有家产的结果。
         """
         try:
             # 获取用户道具持有情况与所有道具模板
@@ -530,7 +524,7 @@ class InventoryService:
 
     def sell_all_rods(self, user_id: str) -> Dict[str, Any]:
         """
-        向系统出售所有鱼竿。
+        向系统卖出所有可出售的鱼竿。
         """
         user = self.user_repo.get_by_id(user_id)
         if not user:
@@ -613,7 +607,7 @@ class InventoryService:
 
     def sell_all_accessories(self, user_id: str) -> Dict[str, Any]:
         """
-        向系统出售所有饰品。
+        向系统卖出所有可出售的饰品。
         """
         user = self.user_repo.get_by_id(user_id)
         if not user:

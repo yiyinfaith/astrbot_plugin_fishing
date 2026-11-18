@@ -1,5 +1,5 @@
 from astrbot.api.event import AstrMessageEvent
-from ..utils import to_percentage, safe_datetime_handler
+from ..utils import to_percentage
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -239,28 +239,5 @@ async def view_gacha_pool(self: "FishingPlugin", event: AstrMessageEvent):
             yield event.plain_result(_format_pool_details(pool, probabilities))
         else:
             yield event.plain_result(f"❌ 查看卡池失败：{result['message']}")
-    else:
-        yield event.plain_result("❌ 出错啦！请稍后再试。")
-
-
-async def gacha_history(self: "FishingPlugin", event: AstrMessageEvent):
-    """查看抽卡记录"""
-    user_id = self._get_effective_user_id(event)
-    if result := self.gacha_service.get_user_gacha_history(user_id):
-        if result["success"]:
-            history = result.get("records", [])
-            if not history:
-                yield event.plain_result("📜 您还没有抽卡记录。")
-                return
-            total_count = len(history)
-            message = f"【📜 抽卡记录】共 {total_count} 条\n\n"
-
-            for record in history:
-                message += f"物品名称: {record['item_name']} (稀有度: {'⭐' * record['rarity']})\n"
-                message += f"时间: {safe_datetime_handler(record['timestamp'])}\n\n"
-
-            yield event.plain_result(message)
-        else:
-            yield event.plain_result(f"❌ 查看抽卡记录失败：{result['message']}")
     else:
         yield event.plain_result("❌ 出错啦！请稍后再试。")

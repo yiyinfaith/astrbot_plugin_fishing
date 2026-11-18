@@ -1,5 +1,6 @@
 import sqlite3
 import threading
+from datetime import date
 from typing import Optional, List, Dict, Any
 
 # 导入抽象基类和领域模型
@@ -107,6 +108,24 @@ class SqliteGachaRepository(AbstractGachaRepository):
                 "SELECT * FROM gacha_pools WHERE cost_coins = 0"
             )
             return [self._row_to_gacha_pool(row) for row in cursor.fetchall()]
+
+    def claim_daily_supply(self, user_id: str, pool_id: int, claim_date: date) -> bool:
+        with self._get_connection() as conn:
+            cursor = conn.execute("""
+                INSERT INTO daily_supply_claims (user_id, gacha_pool_id, claim_date)
+                VALUES (?, ?, ?)
+                ON CONFLICT(user_id, gacha_pool_id) DO UPDATE
+                SET claim_date = excluded.claim_date
+                WHERE daily_supply_claims.claim_date < excluded.claim_date
+            """, (user_id, pool_id, claim_date.isoformat()))
+            return cursor.rowcount == 1
+
+    def release_daily_supply(self, user_id: str, pool_id: int, claim_date: date) -> None:
+        with self._get_connection() as conn:
+            conn.execute("""
+                DELETE FROM daily_supply_claims
+                WHERE user_id = ? AND gacha_pool_id = ? AND claim_date = ?
+            """, (user_id, pool_id, claim_date.isoformat()))
 
     # --- Admin Panel CRUD Methods ---
 

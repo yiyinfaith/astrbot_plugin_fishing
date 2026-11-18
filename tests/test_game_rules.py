@@ -84,6 +84,30 @@ class GameRuleTests(unittest.TestCase):
                 if item.item_type == "coins" and pool.cost_coins:
                     self.assertLess(item.quantity, pool.cost_coins, pool.name)
 
+    def test_daily_supply_is_once_per_day_without_draw_history(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from datetime import date
+        from unittest.mock import patch
+
+        uid = self.new_user()
+        gacha = self.plugin.gacha_service
+        pool_id = gacha.get_daily_free_pool().gacha_pool_id
+        with patch(f"{PLUGIN_DIR.name}.core.services.gacha_service.get_today", return_value=date(2026, 11, 18)):
+            self.assertFalse(gacha.perform_draw(uid, pool_id, 10)["success"])
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                results = list(executor.map(lambda _: gacha.perform_draw(uid, pool_id), range(2)))
+            self.assertEqual(sum(result["success"] for result in results), 1)
+        with patch(f"{PLUGIN_DIR.name}.core.services.gacha_service.get_today", return_value=date(2026, 11, 19)):
+            with patch.object(gacha, "_grant_reward", side_effect=RuntimeError("reward failed")):
+                with self.assertRaisesRegex(RuntimeError, "reward failed"):
+                    gacha.perform_draw(uid, pool_id)
+            self.assertTrue(gacha.perform_draw(uid, pool_id)["success"])
+        with sqlite3.connect(self.plugin.gacha_repo.db_path) as conn:
+            self.assertEqual(
+                conn.execute("SELECT gacha_pool_id, claim_date FROM daily_supply_claims WHERE user_id = ?", (uid,)).fetchall(),
+                [(pool_id, "2026-11-19")],
+            )
+
     # 3. 区域二要 2 星鱼竿，区域三要 3 星鱼竿和通行证
     def test_zone_gates(self):
         service = self.plugin.fishing_service
@@ -234,7 +258,7 @@ class GameRuleTests(unittest.TestCase):
         self.assertIn("已经签到过了", run(say("sign_in", "钓鱼签到"))[0])
         self.assertIn("数字太大", run(say("view_gacha_pool", "查看卡池 99999999999999999999"))[0])
 
-    def test_state_and_paginated_backpack_render_their_information(self):
+    def test_state_and_forwarded_backpack_render_their_information(self):
         from importlib import import_module
         from unittest.mock import AsyncMock, patch
 
@@ -261,11 +285,17 @@ class GameRuleTests(unittest.TestCase):
             def get_sender_id(self):
                 return uid
 
+            def get_self_id(self):
+                return "123456"
+
+            def get_platform_name(self):
+                return "aiocqhttp"
+
             def plain_result(self, text):
                 return text
 
             def chain_result(self, elements):
-                return elements[0].args[0]
+                return elements
 
         async def say(method, text):
             return [result async for result in method(Event(text))][0]
@@ -278,30 +308,31 @@ class GameRuleTests(unittest.TestCase):
             return draw_text(draw, xy, text, *args, **kwargs)
 
         state_draw = import_module(f"{PLUGIN_DIR.name}.draw.state")
-        backpack_draw = import_module(f"{PLUGIN_DIR.name}.draw.backpack")
+        inventory_handlers = import_module(f"{PLUGIN_DIR.name}.handlers.inventory_handlers")
         with (
             patch.object(state_draw, "get_user_avatar", AsyncMock(return_value=None)),
-            patch.object(backpack_draw, "get_user_avatar", AsyncMock(return_value=None)),
+            patch.object(inventory_handlers, "get_user_avatar", AsyncMock(return_value=None)),
             patch.object(ImageDraw.ImageDraw, "text", record_text),
         ):
             result = run(say(self.plugin.state, "钓鱼状态"))
-            self.assertTrue(result.startswith(b"\x89PNG"))
+            self.assertTrue(result[0].args[0].startswith(b"\x89PNG"))
             for expected in ("新手木竿", accessory.name, bait.name, "0 / 480", "下一档 1,000 条 · 20,000 金币"):
                 self.assertIn(expected, "\n".join(text_calls))
 
             text_calls.clear()
             result = run(say(self.plugin.user_backpack, "钓鱼背包"))
-            self.assertTrue(result.startswith(b"\x89PNG"))
-            for expected in (accessory.name, f"ID: B{bait.bait_id}", f"ID: D{item.item_id}", "钓鱼背包 2"):
+            self.assertEqual(len(result), 1)
+            nodes = result[0].args[0]
+            self.assertEqual(len(nodes), 2)
+            for node in nodes:
+                self.assertEqual(node.kwargs["uin"], "123456")
+                self.assertTrue(node.kwargs["content"][0].args[0].startswith(b"\x89PNG"))
+            for expected in (accessory.name, f"ID: B{bait.bait_id}", f"ID: D{item.item_id}"):
                 self.assertIn(expected, "\n".join(text_calls))
-            hidden_rod = self.plugin.inventory_service.get_user_rod_inventory(uid)["rods"][-1]["display_code"]
-            self.assertNotIn(f"ID: {hidden_rod}", text_calls)
-
-            text_calls.clear()
-            result = run(say(self.plugin.user_backpack, "钓鱼背包 2"))
-            self.assertTrue(result.startswith(b"\x89PNG"))
-            self.assertIn(f"ID: {hidden_rod}", text_calls)
-            self.assertIn("只有 2 页", run(say(self.plugin.user_backpack, "钓鱼背包 3")))
+            for rod in self.plugin.inventory_service.get_user_rod_inventory(uid)["rods"]:
+                self.assertIn(f"ID: {rod['display_code']}", text_calls)
+            self.assertNotIn("页", "\n".join(text_calls))
+            self.assertIn("查看全部物品", run(say(self.plugin.user_backpack, "钓鱼背包 2")))
 
     # 审计：指令写回玩家数据时不覆盖后台线程同时做的原子更新
     def test_user_update_keeps_concurrent_changes(self):

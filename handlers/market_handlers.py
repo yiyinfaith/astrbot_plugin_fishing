@@ -15,23 +15,14 @@ async def sell_all(plugin: "FishingPlugin", event: AstrMessageEvent):
         yield event.plain_result("❌ 出错啦！请稍后再试。")
 
 
-async def sell_keep(plugin: "FishingPlugin", event: AstrMessageEvent):
-    """卖出用户鱼，但保留每种鱼一条"""
-    user_id = plugin._get_effective_user_id(event)
-    if result := plugin.inventory_service.sell_all_fish(user_id, keep_one=True):
-        yield event.plain_result(result["message"])
-    else:
-        yield event.plain_result("❌ 出错啦！请稍后再试。")
-
-
 async def sell_everything(plugin: "FishingPlugin", event: AstrMessageEvent):
-    """砸锅卖铁：出售所有未锁定且未装备的鱼竿、饰品和全部鱼类"""
+    """卖出鱼塘中的鱼及未锁定且未装备的鱼竿和饰品。"""
     user_id = plugin._get_effective_user_id(event)
     if result := plugin.inventory_service.sell_everything_except_locked(user_id):
         if result["success"]:
             yield event.plain_result(result["message"])
         else:
-            yield event.plain_result(f"❌ 砸锅卖铁失败：{result['message']}")
+            yield event.plain_result(f"❌ 卖出所有家产失败：{result['message']}")
     else:
         yield event.plain_result("❌ 出错啦！请稍后再试。")
 
@@ -41,10 +32,9 @@ async def sell_by_rarity(plugin: "FishingPlugin", event: AstrMessageEvent):
     user_id = plugin._get_effective_user_id(event)
     args = event.message_str.split()  # 使用 split() 可以更好地处理多个空格
 
-    # 至少需要 "出售稀有度" + 1个数字
     if len(args) < 2:
         yield event.plain_result(
-            "❌ 用法：出售稀有度 <稀有度1> [稀有度2] ...\n例如：出售稀有度 3 4 5"
+            "❌ 用法：卖出稀有度鱼 <星级> [更多星级]\n例如：卖出稀有度鱼 3 4 5"
         )
         return
 

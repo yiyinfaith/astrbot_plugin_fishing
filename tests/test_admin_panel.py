@@ -31,7 +31,9 @@ REMOVED_COMMANDS = [
     "注册", "签到", "背包", "查看背包", "我的背包",
     "鱼塘容量", "鱼竿", "鱼饵", "道具", "我的道具", "查看道具", "饰品",
     "高级货币", "钻石", "星石", "成就", "查看成就", "称号", "查看称号", "使用称号",
-    "钓鱼记录", "钓鱼日志", "钓鱼历史",
+    "钓鱼记录", "钓鱼日志", "钓鱼历史", "抽卡记录",
+    "保留卖出", "保留出售", "卖出保留", "出售保留", "全部卖出", "砸锅卖铁",
+    "出售稀有度", "出售所有鱼竿", "出售所有饰品",
 ]
 
 
@@ -54,7 +56,8 @@ class CommandSurfaceTests(unittest.TestCase):
         self.assertNotIn("filter.regex", MAIN_SOURCE)
         # 保留的核心玩法仍在
         for command in ("钓鱼", "鱼塘", "商店", "商店购买", "市场", "上架", "购买", "下架", "出售", "抽卡", "偷鱼", "排行榜", "转账",
-                        "锁定装备", "解锁装备", "钓鱼状态", "钓鱼注册", "钓鱼签到", "钓鱼背包"):
+                        "锁定装备", "解锁装备", "钓鱼状态", "钓鱼注册", "钓鱼签到", "钓鱼背包",
+                        "卖出所有鱼", "卖出所有家产", "卖出稀有度鱼", "卖出所有鱼竿", "卖出所有饰品"):
             self.assertIn(command, names)
 
     def test_removed_modules_are_gone(self):
@@ -266,7 +269,7 @@ class DatabaseSchemaTests(unittest.TestCase):
         "bank_accounts", "bank_fixed_deposits", "bank_transactions", "bank_withdraw_reservations",
         "tax_debts", "taxes", "commodities", "exchange_prices", "user_commodities",
         "loans", "red_packets", "red_packet_records", "wipe_bomb_log",
-        "titles", "user_titles", "user_achievement_progress", "fishing_records",
+        "titles", "user_titles", "user_achievement_progress", "fishing_records", "gacha_records",
     }
 
     def setUp(self):
@@ -295,6 +298,10 @@ class DatabaseSchemaTests(unittest.TestCase):
         columns = {r[1] for r in conn.execute("PRAGMA table_info(users)")}
         self.assertFalse({"premium_currency", "current_title_id"} & columns)
         self.assertIn("user_fish_stats", tables)
+        self.assertEqual(
+            {r[1] for r in conn.execute("PRAGMA table_info(daily_supply_claims)")},
+            {"user_id", "gacha_pool_id", "claim_date"},
+        )
         self.assertNotIn("cost_premium_currency", {r[1] for r in conn.execute("PRAGMA table_info(gacha_pools)")})
         self.assertNotIn("cost_premium", {r[1] for r in conn.execute("PRAGMA table_info(aquarium_upgrades)")})
         for name in columns:

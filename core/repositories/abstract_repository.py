@@ -8,7 +8,7 @@ from datetime import date, datetime
 from ..domain.models import (
     User, Fish, Rod, Bait, Accessory, Item,
     UserRodInstance, UserAccessoryInstance, UserFishInventoryItem, UserAquariumItem, UserFishStat,
-    GachaRecord, MarketListing,
+    MarketListing,
     GachaPool, GachaPoolItem, FishingZone, UserBuff, AquariumUpgrade,
 )
 
@@ -227,7 +227,6 @@ class AbstractInventoryRepository(ABC):
         self,
         user_id: str,
         rarities: Optional[List[int]] = None,
-        keep_one: bool = False,
     ) -> Dict[str, Any]: pass
     # 原子出售鱼和指定的未锁定、未装备物品
     @abstractmethod
@@ -393,6 +392,14 @@ class AbstractGachaRepository(ABC):
     def get_free_pools(self) -> List[GachaPool]:
         pass
 
+    @abstractmethod
+    def claim_daily_supply(self, user_id: str, pool_id: int, claim_date: date) -> bool:
+        pass
+
+    @abstractmethod
+    def release_daily_supply(self, user_id: str, pool_id: int, claim_date: date) -> None:
+        pass
+
 
 class AbstractMarketRepository(ABC):
     """市场仓储接口"""
@@ -416,24 +423,12 @@ class AbstractMarketRepository(ABC):
 
 class AbstractLogRepository(ABC):
     """日志类数据仓储接口"""
-    # 记录一条抽卡日志
-    @abstractmethod
-    def add_gacha_record(self, record: GachaRecord) -> None: pass
-    # 获取用户抽卡日志
-    @abstractmethod
-    def get_gacha_records(self, user_id: str, limit: int) -> List[GachaRecord]: pass
     # 记录一条签到日志
     @abstractmethod
     def add_check_in(self, user_id: str, check_in_date: date) -> None: pass
     # 检查用户某天是否已签到
     @abstractmethod
     def has_checked_in(self, user_id: str, check_in_date: date) -> bool: pass
-
-    @abstractmethod
-    def get_gacha_records_count_today(
-        self, user_id: str, gacha_pool_id: int
-    ) -> int:
-        pass
 
     @abstractmethod
     def add_log(self, user_id: str, log_type: str, message: str) -> None:
