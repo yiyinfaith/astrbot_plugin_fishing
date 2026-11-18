@@ -304,8 +304,6 @@ async def shop(plugin: "FishingPlugin", event: AstrMessageEvent):
                 cost_text = ""
                 if c["cost_type"] == "coins":
                     cost_text = f"💰 {c['cost_amount']} 金币"
-                elif c["cost_type"] == "premium":
-                    cost_text = f"💎 {c['cost_amount']} 高级货币"
                 elif c["cost_type"] == "item":
                     # 获取道具名称
                     item_template = plugin.item_template_repo.get_by_id(

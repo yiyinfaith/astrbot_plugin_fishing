@@ -1,16 +1,13 @@
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, Any, Optional
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
-from io import BytesIO
-import time
-import json
+from PIL import Image, ImageDraw, ImageFont
 from .utils import get_user_avatar
 from .styles import (
     COLOR_SUCCESS, COLOR_WARNING, COLOR_ERROR, COLOR_GOLD, COLOR_RARE,
-    COLOR_REFINE_RED, COLOR_REFINE_ORANGE, COLOR_CORNER, load_font
+    COLOR_REFINE_RED, COLOR_REFINE_ORANGE, COLOR_CORNER
 )
-from .text_utils import load_font_with_cjk_fallback, draw_text_smart
+from .text_utils import load_font_with_cjk_fallback
 
 def format_rarity_display(rarity: int) -> str:
     """格式化稀有度显示，支持显示到10星，10星以上显示为★★★★★★★★★★+"""
@@ -20,44 +17,9 @@ def format_rarity_display(rarity: int) -> str:
         return '★★★★★★★★★★+'
 
 async def draw_state_image(user_data: Dict[str, Any], data_dir: str) -> Image.Image:
-    """
-    绘制用户状态图像
-    
-    Args:
-        user_data: 包含用户状态信息的字典，    # 定义状态信息的网格位置
-    status_col_x = card_margin + 15
-    status_row1_y = current_y + 12
-    status_row2_y = current_y + 35
-    status_row3_y = current_y + 58
-
-    # 自动钓鱼状态
-    auto_fishing = user_data.get('auto_fishing_enabled', False)
-    if auto_fishing:
-        auto_text = "自动钓鱼: 已开启"
-        auto_color = positive_color
-    else:
-        auto_text = "自动钓鱼: 已关闭"
-        auto_color = negative_color
-    draw.text((status_col_x, status_row1_y), auto_text, font=content_font, fill=auto_color)      - user_id: 用户ID
-            - nickname: 用户昵称
-            - coins: 金币数量
-            - current_rod: 当前装备的鱼竿信息
-            - current_accessory: 当前装备的饰品信息
-            - current_bait: 当前装备的鱼饵信息
-            - auto_fishing_enabled: 是否开启自动钓鱼
-            - steal_cooldown_remaining: 偷鱼剩余CD时间（秒）
-            - fishing_zone: 当前钓鱼区域
-            - current_title: 当前称号信息
-            - total_fishing_count: 总钓鱼次数
-            - steal_total_value: 偷鱼总价值 TODO
-            - signed_in_today: 今日是否签到
-            - electric_fish_cooldown_remaining: 电鱼剩余CD时间（秒）
-            - pond_info: 鱼塘信息
-    Returns:
-        PIL.Image.Image: 生成的状态图像
-    """
+    """绘制钓鱼状态、当前装备和鱼塘容量。"""
     # 画布尺寸 
-    width, height = 620, 517
+    width, height = 620, 540
     
     # 导入优化的渐变生成函数
     from .gradient_utils import create_vertical_gradient
@@ -67,7 +29,7 @@ async def draw_state_image(user_data: Dict[str, Any], data_dir: str) -> Image.Im
     image = create_vertical_gradient(width, height, bg_top, bg_bot)
     draw = ImageDraw.Draw(image)
 
-    # 2. 加载字体（称号字体使用CJK回退支持）
+    # 加载字体
     def load_font(name, size):
         path = os.path.join(os.path.dirname(__file__), "resource", name)
         try:
@@ -79,7 +41,7 @@ async def draw_state_image(user_data: Dict[str, Any], data_dir: str) -> Image.Im
     title_font = load_font("DouyinSansBold.otf", 28)
     subtitle_font = load_font("DouyinSansBold.otf", 24)
     content_font = load_font("DouyinSansBold.otf", 20)
-    # 称号字体使用CJK回退支持，确保繁体中文能正确显示
+    # 小字号使用 CJK 回退字体
     small_font = load_font_with_cjk_fallback(font_path, 16)
     tiny_font = load_font("DouyinSansBold.otf", 14)
 
@@ -167,50 +129,15 @@ async def draw_state_image(user_data: Dict[str, Any], data_dir: str) -> Image.Im
     
   
 
-    # 当前称号,跟在用户昵称后面
-    current_title = user_data.get('current_title')
-    nickname_width = get_text_size(nickname_text, subtitle_font)[0]
-    height_offset = 5
-    if current_title:
-        if isinstance(current_title, dict):
-            title_text = f"{current_title.get('name', '未知称号')}"
-        else:
-            title_text = f"{current_title}"
-
-        # 使用智能文本绘制，自动处理繁体中文等缺失字符
-        draw_text_smart(
-            draw,
-            (col1_x + nickname_width + 10, row1_y + height_offset),
-            title_text,
-            small_font,
-            rare_color
-        )
-    # else:
-    #     title_text = "未装备
-    #     draw.text((col1_x + nickname_width + 10, row1_y + height_offset), title_text, font=small_font, fill=text_color)
-    
     # 金币
     coins = user_data.get('coins', 0)
     coins_text = f"金币: {coins:,}"
-    draw.text((col1_x, row2_y - 12), coins_text, font=small_font, fill=gold_color)
-    
-    # 高级货币（另起一行，避免与右侧“钓鱼次数”重叠）
-    if 'premium_currency' in user_data:
-        premium = user_data.get('premium_currency', 0)
-        premium_text = f"高级货币: {premium:,}"
-        # 另起新行显示并整体上移，避免超出白色卡片底部
-        draw.text((col1_x, row2_y + 8), premium_text, font=small_font, fill=primary_light)
+    draw.text((col1_x, row2_y), coins_text, font=small_font, fill=gold_color)
     
     # 钓鱼次数 - 调整列位置以均分
     total_fishing = user_data.get('total_fishing_count', 0)
     fishing_text = f"钓鱼次数: {total_fishing:,}"
     draw.text((col2_x, row2_y), fishing_text, font=small_font, fill=text_primary)
-
-    # 偷鱼总价值 - 调整列位置以均分 TODO
-    # steal_total = user_data.get('steal_total_value', 0)
-    # steal_text = f"偷鱼获金: {steal_total:,}"
-    # col3_adjusted_x = card_margin + (width - card_margin * 2) * 2 // 3 + card_margin
-    # draw.text((col3_adjusted_x, row2_y), steal_text, font=small_font, fill=warning_color)
 
     # 装备信息区域
     current_y += card_height + 5
@@ -350,7 +277,7 @@ async def draw_state_image(user_data: Dict[str, Any], data_dir: str) -> Image.Im
     draw.text((right_col_x, equipment_row4_y), "钓鱼区域", font=small_font, fill=primary_light)
     
     # 钓鱼区域内容
-    fishing_zone = user_data.get('fishing_zone', {})
+    fishing_zone = user_data.get('fishing_zone') or {}
     zone_name = fishing_zone.get('name', '未知区域')
     zone_display = zone_name[:12] + "..." if len(zone_name) > 12 else zone_name
     draw.text((right_col_x, equipment_row5_y), zone_display, font=content_font, fill=text_primary)
@@ -364,8 +291,8 @@ async def draw_state_image(user_data: Dict[str, Any], data_dir: str) -> Image.Im
     draw.text((card_margin, current_y), status_title, font=subtitle_font, fill=primary_medium)
     current_y += 30
 
-    # 状态卡片：两行两列状态 + 一行鱼塘信息
-    status_card_height = 97
+    # 状态卡片：两行状态和两行鱼塘信息
+    status_card_height = 110
     draw_rounded_rectangle(draw, 
                          (card_margin, current_y, width - card_margin, current_y + status_card_height), 
                          8, fill=card_bg)
@@ -423,17 +350,17 @@ async def draw_state_image(user_data: Dict[str, Any], data_dir: str) -> Image.Im
         ef_cd_color = error_color
     draw.text((status_col2_x, status_row2_y), ef_cd_text, font=content_font, fill=ef_cd_color)
 
-    # 第三行：鱼塘信息
-    pond_info = user_data.get('pond_info', {})
-    if pond_info and pond_info.get('total_count', 0) > 0:
-        # 左列：鱼塘鱼数
-        pond_count_text = f"鱼塘数量: {pond_info['total_count']} 条， 价值: {pond_info['total_value']:,} 金币"
-        draw.text((status_col1_x, status_row3_y), pond_count_text, font=content_font, fill=text_primary)
+    pond = user_data['pond_info']
+    pond_text = (
+        f"鱼塘容量: {pond['current_fish_count']:,} / {pond['fish_pond_capacity']:,} 条"
+        f"    价值: {pond['total_value']:,} 金币"
+    )
+    draw.text((status_col1_x, status_row3_y), pond_text, font=content_font, fill=text_primary)
+    if pond['next_capacity'] is None:
+        upgrade_text = "鱼塘容量已达上限"
     else:
-        # 鱼塘为空时显示
-        pond_empty_text = "鱼塘里什么都没有..."
-        draw.text((status_col1_x, status_row3_y), pond_empty_text, font=content_font, fill=text_muted)
-
+        upgrade_text = f"下一档 {pond['next_capacity']:,} 条 · {pond['next_cost']:,} 金币 · 升级鱼塘"
+    draw.text((status_col1_x, status_row3_y + 23), upgrade_text, font=small_font, fill=text_secondary)
 
     # 10. 底部信息 - 调整位置
     current_y += status_card_height + 15
@@ -455,7 +382,7 @@ async def draw_state_image(user_data: Dict[str, Any], data_dir: str) -> Image.Im
     return image
 
 
-def get_user_state_data(user_repo, inventory_repo, item_template_repo, log_repo, buff_repo, game_config, user_id: str) -> Optional[Dict[str, Any]]:
+def get_user_state_data(user_repo, inventory_repo, item_template_repo, inventory_service, game_config, user_id: str) -> Optional[Dict[str, Any]]:
     """
     获取用户状态数据
     
@@ -463,15 +390,14 @@ def get_user_state_data(user_repo, inventory_repo, item_template_repo, log_repo,
         user_repo: 用户仓储
         inventory_repo: 库存仓储
         item_template_repo: 物品模板仓储
-        log_repo: 日志仓储
-        buff_repo: 用户增益仓储
+        inventory_service: 库存服务，用于查询鱼塘容量及扩容档位
         game_config: 游戏配置
         user_id: 用户ID
     
     Returns:
         包含用户状态信息的字典，如果用户不存在则返回None
     """
-    from ..core.utils import get_now, get_today
+    from ..core.utils import get_now
     
     # 获取用户基本信息
     user = user_repo.get_by_id(user_id)
@@ -568,37 +494,6 @@ def get_user_state_data(user_repo, inventory_repo, item_template_repo, log_repo,
         if elapsed < cooldown_seconds:
             electric_fish_cooldown_remaining = int(cooldown_seconds - elapsed)
     
-    # 获取当前称号
-    current_title = None
-    if hasattr(user, 'current_title_id') and user.current_title_id:
-        try:
-            # 尝试从各种可能的来源获取称号信息
-            title_info = None
-            if hasattr(item_template_repo, 'get_title_by_id'):
-                title_info = item_template_repo.get_title_by_id(user.current_title_id)
-            
-            if title_info:
-                current_title = {
-                    'id': user.current_title_id,
-                    'name': title_info.name if hasattr(title_info, 'name') else str(title_info)
-                }
-            else:
-                # 如果无法获取详细信息，至少显示称号ID
-                current_title = {
-                    'id': user.current_title_id,
-                    'name': f"称号#{user.current_title_id}"
-                }
-        except:
-            # 如果获取称号失败，忽略
-            current_title = None
-    
-    # 获取总钓鱼次数
-    total_fishing_count = getattr(user, 'total_fishing_count', 0)
-    
-    # 获取偷鱼总价值
-    # steal_total_value = getattr(user, 'steal_total_value', 0)
-    steal_total_value = '0' # 似乎没有偷鱼总价值字段？
-
     # 检查今日是否签到
     signed_in_today = False
     if hasattr(user, 'last_login_time') and user.last_login_time:
@@ -606,33 +501,10 @@ def get_user_state_data(user_repo, inventory_repo, item_template_repo, log_repo,
         last_login_date = user.last_login_time.date() if hasattr(user.last_login_time, 'date') else user.last_login_time
         signed_in_today = (last_login_date == today)
     
-    # 获取鱼塘信息
-    pond_info = None
-    try:
-        # 使用与inventory_service.get_user_fish_pond相同的逻辑获取鱼塘信息
-        inventory_items = inventory_repo.get_fish_inventory(user_id)
-        total_value = inventory_repo.get_fish_inventory_value(user_id)
-        
-        # 计算总鱼数
-        total_count = sum(item.quantity for item in inventory_items) if inventory_items else 0
-        
-        if total_count > 0 or total_value > 0:
-            pond_info = {
-                'total_count': total_count,
-                'total_value': total_value
-            }
-        else:
-            pond_info = {'total_count': 0, 'total_value': 0}
-            
-    except Exception as e:
-        # 如果获取鱼塘信息失败，设置为默认值
-        pond_info = {'total_count': 0, 'total_value': 0}
-    
     return {
         'user_id': user.user_id,
         'nickname': user.nickname or user.user_id,
         'coins': user.coins,
-        'premium_currency': getattr(user, 'premium_currency', 0),
         'current_rod': current_rod,
         'current_accessory': current_accessory,
         'current_bait': current_bait,
@@ -640,9 +512,7 @@ def get_user_state_data(user_repo, inventory_repo, item_template_repo, log_repo,
         'steal_cooldown_remaining': steal_cooldown_remaining,
         'electric_fish_cooldown_remaining': electric_fish_cooldown_remaining,
         'fishing_zone': fishing_zone,
-        'current_title': current_title,
-        'total_fishing_count': total_fishing_count,
-        'steal_total_value': steal_total_value,
+        'total_fishing_count': user.total_fishing_count,
         'signed_in_today': signed_in_today,
-        'pond_info': pond_info,
+        'pond_info': inventory_service.get_user_fish_pond_capacity(user_id),
     }

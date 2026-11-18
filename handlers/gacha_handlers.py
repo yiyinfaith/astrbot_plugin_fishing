@@ -1,5 +1,5 @@
-from astrbot.api.event import filter, AstrMessageEvent
-from ..utils import parse_target_user_id, to_percentage, safe_datetime_handler
+from astrbot.api.event import AstrMessageEvent
+from ..utils import to_percentage, safe_datetime_handler
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -30,10 +30,7 @@ def _format_pool_details(pool, probabilities):
         if len(display_time) > 16:
             display_time = display_time[:16]
         message += f"限时开放 至: {display_time}\n"
-    if _get_field(pool, "cost_premium_currency"):
-        message += f"花费: {pool['cost_premium_currency']} 高级货币 / 次\n\n"
-    else:
-        message += f"花费: {pool['cost_coins']} 金币 / 次\n\n"
+    message += f"花费: {pool['cost_coins']} 金币 / 次\n\n"
     message += "【📋 物品概率】\n"
     if probabilities:
         for item in probabilities:
@@ -57,8 +54,6 @@ async def gacha(self: "FishingPlugin", event: AstrMessageEvent):
         message = "【🎰 抽奖池列表】\n\n"
         for pool in pools.get("pools", []):
             cost_text = f"💰 金币 {pool['cost_coins']} / 次"
-            if pool["cost_premium_currency"]:
-                cost_text = f"💎 高级货币 {pool['cost_premium_currency']} / 次"
             message += f"ID: {pool['gacha_pool_id']} - {pool['name']} - {pool['description']}\n {cost_text}\n\n"
         # 添加卡池详细信息
         message += "【📋 卡池详情】使用「查看卡池 ID」命令查看详细物品概率\n"
@@ -155,18 +150,8 @@ async def multi_ten_gacha(self: "FishingPlugin", event: AstrMessageEvent, pool_i
         yield event.plain_result("❌ 卡池不存在")
         return
     
-    # 计算总消耗
-    use_premium_currency = (getattr(pool, "cost_premium_currency", 0) or 0) > 0
-    total_draws = times * 10  # 每次十连是10次抽卡
-    if use_premium_currency:
-        total_cost = (pool.cost_premium_currency or 0) * total_draws
-        cost_type = "高级货币"
-        cost_unit = "点"
-    else:
-        total_cost = (pool.cost_coins or 0) * total_draws
-        cost_type = "金币"
-        cost_unit = ""
-    
+    total_cost = (pool.cost_coins or 0) * times * 10
+
     # 统计信息
     total_items = 0
     item_counts = {}  # 物品名称 -> 数量
@@ -211,7 +196,7 @@ async def multi_ten_gacha(self: "FishingPlugin", event: AstrMessageEvent, pool_i
     
     # 消耗统计
     message += f"【💰 消耗统计】\n"
-    message += f"消耗{cost_type}：{total_cost:,}{cost_unit}\n\n"
+    message += f"消耗金币：{total_cost:,}\n\n"
     
     # 稀有度统计
     message += "【📊 稀有度统计】\n"

@@ -111,7 +111,6 @@ def _update_gacha(cursor: sqlite3.Cursor):
         )
     pool = cursor.execute(
         "SELECT gacha_pool_id FROM gacha_pools WHERE gacha_pool_id = 3 AND cost_coins = 0 "
-        "AND (cost_premium_currency = 0 OR cost_premium_currency IS NULL)"
     ).fetchone()
     has_items = cursor.execute("SELECT 1 FROM gacha_pool_items WHERE gacha_pool_id = 3").fetchone()
     if pool and not has_items:

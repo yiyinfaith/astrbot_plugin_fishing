@@ -10,7 +10,6 @@ from ..repositories.abstract_repository import (
     AbstractInventoryRepository,
     AbstractItemTemplateRepository,
     AbstractLogRepository,
-    AbstractAchievementRepository
 )
 from ..domain.models import GachaPool, GachaPoolItem, GachaRecord
 from ..utils import get_now
@@ -39,13 +38,11 @@ class GachaService:
         inventory_repo: AbstractInventoryRepository,
         item_template_repo: AbstractItemTemplateRepository,
         log_repo: AbstractLogRepository,
-        achievement_repo: AbstractAchievementRepository
     ):
         self.gacha_repo = gacha_repo
         self.user_repo = user_repo
         self.inventory_repo = inventory_repo
         self.item_template_repo = item_template_repo
-        self.achievement_repo = achievement_repo
         self.log_repo = log_repo
 
     def get_all_pools(self) -> Dict[str, Any]:
@@ -95,14 +92,12 @@ class GachaService:
                 item_rarity = general_item.rarity if general_item else 1
             elif item.item_type == "coins":
                 item_name = f"{item.quantity} 金币"
-            elif item.item_type == "titles":
-                item_name = self.item_template_repo.get_title_by_id(item.item_id).name
 
             probabilities.append({
                 "item_type": item.item_type,
                 "item_id": item.item_id,
                 "item_name": item_name,
-                "item_rarity": item_rarity if item.item_type != "titles" else 0,
+                "item_rarity": item_rarity,
                 "weight": item.weight,
                 "probability": 1.0 + round(probability, 4)
             })
@@ -167,17 +162,9 @@ class GachaService:
             # 解析失败时不中断抽卡流程
             pass
 
-        # 计算费用：若配置了高级货币费用，则优先使用高级货币；否则使用金币
-        use_premium_currency = (getattr(pool, "cost_premium_currency", 0) or 0) > 0
-        total_premium_cost = (pool.cost_premium_currency or 0) * num_draws
         total_coin_cost = (pool.cost_coins or 0) * num_draws
-
-        if use_premium_currency:
-            if user.premium_currency < total_premium_cost:
-                return {"success": False, "message": f"高级货币不足，需要 {total_premium_cost} 点高级货币"}
-        else:
-            if not user.can_afford(total_coin_cost):
-                return {"success": False, "message": f"金币不足，需要 {total_coin_cost} 金币"}
+        if not user.can_afford(total_coin_cost):
+            return {"success": False, "message": f"金币不足，需要 {total_coin_cost} 金币"}
 
         # 1. 执行抽卡
         draw_results = []
@@ -190,10 +177,7 @@ class GachaService:
             return {"success": False, "message": "抽卡失败，请检查卡池配置"}
 
         # 2. 扣除费用
-        if use_premium_currency:
-            user.premium_currency -= total_premium_cost
-        else:
-            user.coins -= total_coin_cost
+        user.coins -= total_coin_cost
         self.user_repo.update(user)
 
         # 3. 发放奖励并记录日志
@@ -240,12 +224,6 @@ class GachaService:
                     "type": "coins",
                     "quantity": item.quantity
                 })
-            elif item.item_type == "titles":
-                granted_rewards.append({
-                    "type": "title",
-                    "id": item.item_id,
-                    "name": self.item_template_repo.get_title_by_id(item.item_id).name
-                })
 
         return {"success": True, "results": granted_rewards}
 
@@ -276,10 +254,6 @@ class GachaService:
             user.coins += item.quantity
             self.user_repo.update(user)
             item_name = f"{item.quantity} 金币"
-        elif item.item_type == "titles":
-            # 注意：成就仓储负责授予称号
-            self.achievement_repo.grant_title_to_user(user_id, item.item_id)
-            template = self.item_template_repo.get_title_by_id(item.item_id)
 
         if template:
             item_name = template.name

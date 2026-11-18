@@ -180,14 +180,12 @@ class GameRuleTests(unittest.TestCase):
         self.assertEqual(service.get_cooldown_seconds(uid), 90)
         self.assertEqual(service.get_cooldown_seconds(uid, auto=True), 180)
 
-    # 7 与 8. 签到不再给高级货币，会领每日补给
     def test_sign_in(self):
         uid = self.new_user()
         result = self.plugin.user_service.daily_sign_in(uid)
         self.assertTrue(result["success"], result)
-        self.assertNotIn("高级货币", result["message"])
         self.assertIn("每日补给", result["message"])
-        self.assertEqual(self.plugin.user_repo.get_by_id(uid).premium_currency, 0)
+        self.assertGreaterEqual(self.coins(uid), 100)
 
     # 8. 没有商品的商店默认关闭
     def test_empty_shops_are_closed(self):
@@ -236,6 +234,75 @@ class GameRuleTests(unittest.TestCase):
         self.assertIn("已经签到过了", run(say("sign_in", "钓鱼签到"))[0])
         self.assertIn("数字太大", run(say("view_gacha_pool", "查看卡池 99999999999999999999"))[0])
 
+    def test_state_and_paginated_backpack_render_their_information(self):
+        from importlib import import_module
+        from unittest.mock import AsyncMock, patch
+
+        from PIL import ImageDraw
+
+        uid = self.new_user()
+        rod = next(rod for rod in self.templates.get_all_rods() if rod.name == "新手木竿")
+        accessory = self.templates.get_all_accessories()[0]
+        bait = next(bait for bait in self.templates.get_all_baits() if bait.name == "普通蚯蚓")
+        item = self.templates.get_all_items()[0]
+        for kind, item_id, quantity in (
+            ("rod", rod.rod_id, 12), ("accessory", accessory.accessory_id, 1),
+            ("bait", bait.bait_id, 5), ("item", item.item_id, 3),
+        ):
+            self.assertTrue(self.plugin.user_service.add_item_to_user_inventory(uid, kind, item_id, quantity)["success"])
+        owned_accessory = self.inventory.get_user_accessory_instances(uid)[0]
+        self.assertTrue(self.plugin.inventory_service.equip_item(uid, owned_accessory.accessory_instance_id, "accessory")["success"])
+        self.assertTrue(self.plugin.inventory_service.use_bait(uid, bait.bait_id)["success"])
+
+        class Event:
+            def __init__(self, text):
+                self.message_str = text
+
+            def get_sender_id(self):
+                return uid
+
+            def plain_result(self, text):
+                return text
+
+            def chain_result(self, elements):
+                return elements[0].args[0]
+
+        async def say(method, text):
+            return [result async for result in method(Event(text))][0]
+
+        text_calls = []
+        draw_text = ImageDraw.ImageDraw.text
+
+        def record_text(draw, xy, text, *args, **kwargs):
+            text_calls.append(text)
+            return draw_text(draw, xy, text, *args, **kwargs)
+
+        state_draw = import_module(f"{PLUGIN_DIR.name}.draw.state")
+        backpack_draw = import_module(f"{PLUGIN_DIR.name}.draw.backpack")
+        with (
+            patch.object(state_draw, "get_user_avatar", AsyncMock(return_value=None)),
+            patch.object(backpack_draw, "get_user_avatar", AsyncMock(return_value=None)),
+            patch.object(ImageDraw.ImageDraw, "text", record_text),
+        ):
+            result = run(say(self.plugin.state, "钓鱼状态"))
+            self.assertTrue(result.startswith(b"\x89PNG"))
+            for expected in ("新手木竿", accessory.name, bait.name, "0 / 480", "下一档 1,000 条 · 20,000 金币"):
+                self.assertIn(expected, "\n".join(text_calls))
+
+            text_calls.clear()
+            result = run(say(self.plugin.user_backpack, "钓鱼背包"))
+            self.assertTrue(result.startswith(b"\x89PNG"))
+            for expected in (accessory.name, f"ID: B{bait.bait_id}", f"ID: D{item.item_id}", "钓鱼背包 2"):
+                self.assertIn(expected, "\n".join(text_calls))
+            hidden_rod = self.plugin.inventory_service.get_user_rod_inventory(uid)["rods"][-1]["display_code"]
+            self.assertNotIn(f"ID: {hidden_rod}", text_calls)
+
+            text_calls.clear()
+            result = run(say(self.plugin.user_backpack, "钓鱼背包 2"))
+            self.assertTrue(result.startswith(b"\x89PNG"))
+            self.assertIn(f"ID: {hidden_rod}", text_calls)
+            self.assertIn("只有 2 页", run(say(self.plugin.user_backpack, "钓鱼背包 3")))
+
     # 审计：指令写回玩家数据时不覆盖后台线程同时做的原子更新
     def test_user_update_keeps_concurrent_changes(self):
         from datetime import datetime
@@ -255,12 +322,6 @@ class GameRuleTests(unittest.TestCase):
         self.plugin.user_repo.update(stale)
         self.assertEqual(self.plugin.user_repo.get_by_id(uid).coins, 1090)
         self.assertGreaterEqual(self.plugin.user_repo.get_by_id(uid).max_coins, 1090)
-
-    # 审计：成就奖励的类型都能发放
-    def test_achievement_rewards_are_supported(self):
-        for ach in self.plugin.achievement_service.achievements:
-            if getattr(ach, "reward", None):
-                self.assertIn(ach.reward[0], ("coins", "title", "bait", "rod", "accessory"), ach.name)
 
     # 10. 除了新手木竿，内置鱼竿都有耐久
     def test_rod_durability(self):

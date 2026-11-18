@@ -114,6 +114,10 @@ def install(data_root: Path) -> None:
         def fromFileSystem(cls, path):
             return cls(path)
 
+        @classmethod
+        def fromBytes(cls, data):
+            return cls(data)
+
     components.Image = _Comp
     components.At = _Comp
     components.Plain = _Comp

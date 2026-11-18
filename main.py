@@ -5,7 +5,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools
 
 # ==========================================================
-# 导入所有仓储层 & 服务层（与旧版保持一致的精确导入）
+# 导入仓储和服务
 # ==========================================================
 from .core.repositories.sqlite_user_repo import SqliteUserRepository
 from .core.repositories.sqlite_item_template_repo import SqliteItemTemplateRepository
@@ -14,7 +14,6 @@ from .core.repositories.sqlite_gacha_repo import SqliteGachaRepository
 from .core.repositories.sqlite_market_repo import SqliteMarketRepository
 from .core.repositories.sqlite_shop_repo import SqliteShopRepository
 from .core.repositories.sqlite_log_repo import SqliteLogRepository
-from .core.repositories.sqlite_achievement_repo import SqliteAchievementRepository
 from .core.repositories.sqlite_user_buff_repo import SqliteUserBuffRepository
 
 from .core.services.data_setup_service import DataSetupService
@@ -25,7 +24,6 @@ from .core.services.inventory_service import InventoryService
 from .core.services.shop_service import ShopService
 from .core.services.market_service import MarketService
 from .core.services.gacha_service import GachaService
-from .core.services.achievement_service import AchievementService
 from .core.services.game_mechanics_service import GameMechanicsService
 from .core.services.effect_manager import EffectManager
 from .core.services.fishing_zone_service import FishingZoneService
@@ -160,7 +158,6 @@ class FishingPlugin(Star):
         self.market_repo = SqliteMarketRepository(db_path)
         self.shop_repo = SqliteShopRepository(db_path)
         self.log_repo = SqliteLogRepository(db_path)
-        self.achievement_repo = SqliteAchievementRepository(db_path)
         self.buff_repo = SqliteUserBuffRepository(db_path)
 
         # --- 3. 组合根：实例化所有服务层，并注入依赖 ---
@@ -171,9 +168,9 @@ class FishingPlugin(Star):
 
         # 3.3 实例化其他核心服务
         self.gacha_service = GachaService(self.gacha_repo, self.user_repo, self.inventory_repo, self.item_template_repo,
-                                         self.log_repo, self.achievement_repo)
+                                         self.log_repo)
         # UserService 依赖 GachaService，因此在 GachaService 之后实例化
-        self.user_service = UserService(self.user_repo, self.log_repo, self.inventory_repo, self.item_template_repo, self.gacha_service, self.game_config, self.achievement_repo)
+        self.user_service = UserService(self.user_repo, self.log_repo, self.inventory_repo, self.item_template_repo, self.gacha_service, self.game_config)
         self.inventory_service = InventoryService(
             self.inventory_repo,
             self.user_repo,
@@ -185,8 +182,6 @@ class FishingPlugin(Star):
         self.shop_service = ShopService(self.item_template_repo, self.inventory_repo, self.user_repo, self.shop_repo, self.game_config)
         self.market_service = MarketService(self.market_repo, self.inventory_repo, self.user_repo, self.log_repo,
                                            self.item_template_repo, self.game_config)
-        self.achievement_service = AchievementService(self.achievement_repo, self.user_repo, self.inventory_repo,
-                                                     self.item_template_repo, self.log_repo)
         self.fish_weight_service = FishWeightService()
         self.fishing_service = FishingService(
             self.user_repo,
@@ -232,7 +227,6 @@ class FishingPlugin(Star):
 
         # --- 4. 启动后台任务 ---
         self.fishing_service.start_auto_fishing_task()
-        self.achievement_service.start_achievement_check_task()
 
         # --- 5. 初始化核心游戏数据 ---
         data_setup_service = DataSetupService(
@@ -306,15 +300,9 @@ class FishingPlugin(Star):
         async for r in self._guard(event, self.fishing_handlers.auto_fish(event)):
             yield r
 
-    @filter.command("钓鱼记录", alias={"钓鱼日志", "钓鱼历史"})
-    async def fishing_log(self, event: AstrMessageEvent):
-        """查看你的钓鱼历史记录"""
-        async for r in self._guard(event, common_handlers.fishing_log(self, event)):
-            yield r
-
     @filter.command("钓鱼状态", alias={"我的状态"})
     async def state(self, event: AstrMessageEvent):
-        """查看你的游戏状态，包括金币、等级、装备等信息"""
+        """查看当前装备、钓鱼区域、鱼塘容量及扩容价格"""
         async for r in self._guard(event, common_handlers.state(self, event)):
             yield r
 
@@ -328,7 +316,7 @@ class FishingPlugin(Star):
 
     @filter.command("钓鱼背包")
     async def user_backpack(self, event: AstrMessageEvent):
-        """查看你的背包，包含所有物品和装备"""
+        """分页查看鱼竿、饰品、鱼饵和道具。用法：钓鱼背包 [页码]"""
         async for r in self._guard(event, inventory_handlers.user_backpack(self, event)):
             yield r
 
@@ -342,12 +330,6 @@ class FishingPlugin(Star):
     async def peek_pond(self, event: AstrMessageEvent):
         """偷看别人的鱼塘，查看其他玩家的鱼。用法：偷看鱼塘 @用户"""
         async for r in self._guard(event, inventory_handlers.peek_pond(self, event)):
-            yield r
-
-    @filter.command("鱼塘容量")
-    async def pond_capacity(self, event: AstrMessageEvent):
-        """查看当前鱼塘容量和升级信息"""
-        async for r in self._guard(event, inventory_handlers.pond_capacity(self, event)):
             yield r
 
     @filter.command("升级鱼塘", alias={"鱼塘升级"})
@@ -381,12 +363,6 @@ class FishingPlugin(Star):
         async for r in self._guard(event, aquarium_handlers.upgrade_aquarium(self, event)):
             yield r
 
-    @filter.command("鱼竿")
-    async def rod(self, event: AstrMessageEvent):
-        """查看你拥有的所有鱼竿"""
-        async for r in self._guard(event, inventory_handlers.rod(self, event)):
-            yield r
-
     @filter.command("精炼", alias={"强化"})
     async def refine_equipment(self, event: AstrMessageEvent):
         """精炼装备提升属性。用法：精炼 装备编号"""
@@ -399,28 +375,10 @@ class FishingPlugin(Star):
         async for r in self._guard(event, inventory_handlers.sell_equipment(self, event)):
             yield r
 
-    @filter.command("鱼饵")
-    async def bait(self, event: AstrMessageEvent):
-        """查看你拥有的所有鱼饵"""
-        async for r in self._guard(event, inventory_handlers.bait(self, event)):
-            yield r
-
-    @filter.command("道具", alias={"我的道具", "查看道具"})
-    async def items(self, event: AstrMessageEvent):
-        """查看你拥有的所有道具"""
-        async for r in self._guard(event, inventory_handlers.items(self, event)):
-            yield r
-
     @filter.command("开启全部钱袋", alias={"打开全部钱袋", "打开所有钱袋"})
     async def open_all_money_bags(self, event: AstrMessageEvent):
         """一次性打开所有钱袋，获得金币"""
         async for r in self._guard(event, inventory_handlers.open_all_money_bags(self, event)):
-            yield r
-
-    @filter.command("饰品")
-    async def accessories(self, event: AstrMessageEvent):
-        """查看你拥有的所有饰品"""
-        async for r in self._guard(event, inventory_handlers.accessories(self, event)):
             yield r
 
     @filter.command("锁定装备", alias={"上锁"})
@@ -457,12 +415,6 @@ class FishingPlugin(Star):
     async def update_nickname(self, event: AstrMessageEvent):
         """更新你的游戏昵称。用法：更新昵称 新昵称"""
         async for r in self._guard(event, common_handlers.update_nickname(self, event)):
-            yield r
-
-    @filter.command("高级货币", alias={"钻石", "星石"})
-    async def premium(self, event: AstrMessageEvent):
-        """查看你当前拥有的高级货币数量"""
-        async for r in self._guard(event, inventory_handlers.premium(self, event)):
             yield r
 
     # =========== 钓鱼与图鉴 ==========
@@ -611,29 +563,10 @@ class FishingPlugin(Star):
         async for r in self._guard(event, social_handlers.dispel_protection(self, event)):
             yield r
 
-    @filter.command("查看称号", alias={"称号"})
-    async def view_titles(self, event: AstrMessageEvent):
-        """查看你拥有的所有称号"""
-        async for r in self._guard(event, social_handlers.view_titles(self, event)):
-            yield r
-
-    @filter.command("使用称号")
-    async def use_title(self, event: AstrMessageEvent):
-        """装备或卸下称号。用法：使用称号 称号编号"""
-        async for r in self._guard(event, social_handlers.use_title(self, event)):
-            yield r
-
-    @filter.command("查看成就", alias={"成就"})
-    async def view_achievements(self, event: AstrMessageEvent):
-        """查看你的成就完成情况"""
-        async for r in self._guard(event, social_handlers.view_achievements(self, event)):
-            yield r
-
     async def terminate(self):
         """插件被卸载/停用时调用"""
         logger.info("钓鱼插件正在终止...")
         self.fishing_service.stop_auto_fishing_task()
-        self.achievement_service.stop_achievement_check_task()
         
         for repo in (self.user_repo, self.inventory_repo):
             repo.close_connection()

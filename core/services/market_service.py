@@ -50,7 +50,6 @@ class MarketService:
                 nickname="[系统-市场托管]",
                 created_at=datetime.now(),
                 coins=0,
-                premium_currency=0
             )
             self.user_repo.add(market_user)
             logger.info("创建虚拟市场用户(MARKET)用于托管上架装备")

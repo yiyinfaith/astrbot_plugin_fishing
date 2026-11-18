@@ -447,12 +447,6 @@ class FishingService:
                     rod_name = rod_template.name if rod_template else "鱼竿"
                     equipment_broken_messages.append(f"⚠️ 您的{rod_name}已损坏，自动卸下！")
 
-        accessory_instance_id = None
-        if user.equipped_accessory_instance_id:
-            accessory_instance = self.inventory_repo.get_user_accessory_instance_by_id(user.user_id, user.equipped_accessory_instance_id)
-            if accessory_instance:
-                accessory_instance_id = accessory_instance.accessory_instance_id
-
         settled_at = get_now()
         settled = self.inventory_repo.settle_fishing_catch(
             user_id=user.user_id,
@@ -460,7 +454,6 @@ class FishingService:
             total_catches=total_catches,
             quality_level=quality_level,
             weight=weight,
-            base_value=value,
             earned_value=fish_template.base_value * total_catches * (1 + quality_level),
             fishing_cost=fishing_cost,
             fish_pond_capacity=user.fish_pond_capacity,
@@ -468,8 +461,6 @@ class FishingService:
             rod_instance_id=rod_instance_id,
             rod_durability=rod_durability,
             rod_broken=rod_broken,
-            accessory_instance_id=accessory_instance_id,
-            bait_id=user.current_bait_id,
         )
         if not settled:
             return {"success": False, "message": f"金币不足，需要 {fishing_cost} 金币。"}
@@ -533,44 +524,6 @@ class FishingService:
             "unlocked_fish_count": unlock_fish_count,
             "unlocked_percentage": (unlock_fish_count / all_fish_count) if all_fish_count > 0 else 0
     }
-
-    def get_user_fish_log(self, user_id: str, limit: int = 10) -> Dict[str, Any]:
-        """
-        获取用户的钓鱼记录。
-
-        Args:
-            user_id: 用户ID。
-            limit: 返回记录的数量限制。
-
-        Returns:
-            包含钓鱼记录的字典。
-        """
-        records = self.log_repo.get_fishing_records(user_id, limit)
-        # 根据records中的 fish_id 获取鱼类名称 rod_instance_id 和 accessory_instance_id 以及 bait_id 获取鱼竿、饰品、鱼饵信息
-        fish_details = []
-        for record in records:
-            fish_template = self.item_template_repo.get_fish_by_id(record.fish_id)
-            bait_template = self.item_template_repo.get_bait_by_id(record.bait_id) if record.bait_id else None
-
-            user_rod = self.inventory_repo.get_user_rod_instance_by_id(user_id, record.rod_instance_id) if record.rod_instance_id else None
-            rod_instance = self.item_template_repo.get_rod_by_id(user_rod.rod_id) if user_rod else None
-            user_accessory = self.inventory_repo.get_user_accessory_instance_by_id(user_id, record.accessory_instance_id) if record.accessory_instance_id else None
-            accessory_instance = self.item_template_repo.get_accessory_by_id(user_accessory.accessory_id) if user_accessory else None
-
-            fish_details.append({
-                "fish_name": fish_template.name if fish_template else "未知鱼类",
-                "fish_rarity": fish_template.rarity if fish_template else "未知稀有度",
-                "fish_weight": record.weight,
-                "fish_value": record.value,
-                "timestamp": record.timestamp,
-                "rod": rod_instance.name if rod_instance else "未装备鱼竿",
-                "accessory": accessory_instance.name if accessory_instance else "未装备饰品",
-                "bait": bait_template.name if bait_template else "未使用鱼饵",
-            })
-        return {
-            "success": True,
-            "records": fish_details
-        }
 
     def get_user_fishing_zones(self, user_id: str) -> Dict[str, Any]:
         """

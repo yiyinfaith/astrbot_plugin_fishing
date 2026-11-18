@@ -1,8 +1,7 @@
-from typing import Dict, Any, List, Optional
-from datetime import datetime
+from typing import Dict, Any, List
 
 from ..repositories.abstract_repository import AbstractInventoryRepository, AbstractUserRepository, AbstractItemTemplateRepository
-from ..domain.models import User, UserAquariumItem, AquariumUpgrade, Fish
+from ..domain.models import AquariumUpgrade
 
 
 class AquariumService:
@@ -146,16 +145,8 @@ class AquariumService:
                 "message": f"金币不足！需要 {upgrade_config.cost_coins} 金币，当前只有 {user.coins} 金币"
             }
 
-        # 检查用户是否有足够的高级货币
-        if user.premium_currency < upgrade_config.cost_premium:
-            return {
-                "success": False, 
-                "message": f"高级货币不足！需要 {upgrade_config.cost_premium}，当前只有 {user.premium_currency}"
-            }
-
         # 扣除费用并升级
         user.coins -= upgrade_config.cost_coins
-        user.premium_currency -= upgrade_config.cost_premium
         user.aquarium_capacity = upgrade_config.capacity
 
         try:
@@ -190,52 +181,3 @@ class AquariumService:
             ),
             1,
         )
-
-    def get_aquarium_upgrade_info(self, user_id: str) -> Dict[str, Any]:
-        """获取用户水族箱升级信息"""
-        user = self.user_repo.get_by_id(user_id)
-        if not user:
-            return {"success": False, "message": "用户不存在"}
-
-        current_level = self._get_current_aquarium_level(user.aquarium_capacity)
-        next_level = current_level + 1
-        next_upgrade = self.inventory_repo.get_aquarium_upgrade_by_level(next_level)
-
-        upgrades = self.get_aquarium_upgrades()
-        current_upgrade = self.inventory_repo.get_aquarium_upgrade_by_level(current_level)
-
-        return {
-            "success": True,
-            "current_level": current_level,
-            "current_capacity": user.aquarium_capacity,
-            "current_upgrade": current_upgrade,
-            "next_upgrade": next_upgrade,
-            "all_upgrades": upgrades
-        }
-
-    def can_afford_upgrade(self, user_id: str) -> Dict[str, Any]:
-        """检查用户是否可以承担升级费用"""
-        user = self.user_repo.get_by_id(user_id)
-        if not user:
-            return {"success": False, "message": "用户不存在"}
-
-        current_level = self._get_current_aquarium_level(user.aquarium_capacity)
-        next_level = current_level + 1
-        next_upgrade = self.inventory_repo.get_aquarium_upgrade_by_level(next_level)
-
-        if not next_upgrade:
-            return {"success": False, "message": "已达到最高等级"}
-
-        can_afford_coins = user.coins >= next_upgrade.cost_coins
-        can_afford_premium = user.premium_currency >= next_upgrade.cost_premium
-
-        return {
-            "success": True,
-            "can_afford": can_afford_coins and can_afford_premium,
-            "can_afford_coins": can_afford_coins,
-            "can_afford_premium": can_afford_premium,
-            "required_coins": next_upgrade.cost_coins,
-            "required_premium": next_upgrade.cost_premium,
-            "user_coins": user.coins,
-            "user_premium": user.premium_currency
-        }

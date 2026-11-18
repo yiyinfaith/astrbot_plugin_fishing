@@ -276,7 +276,6 @@ class ShopService:
     def _merge_costs(self, base_costs: Dict, new_costs: Dict) -> None:
         """辅助函数：将 new_costs 合并到 base_costs 中，能处理带品质的鱼类成本。"""
         base_costs["coins"] = base_costs.get("coins", 0) + new_costs.get("coins", 0)
-        base_costs["premium"] = base_costs.get("premium", 0) + new_costs.get("premium", 0)
 
         for category in ["items", "fish", "rods", "accessories"]:
             if category not in new_costs:
@@ -316,7 +315,7 @@ class ShopService:
                 groups[group_id] = []
             groups[group_id].append(cost)
 
-        and_costs = {"coins": 0, "premium": 0, "items": {}, "fish": {}, "rods": {}, "accessories": {}}
+        and_costs = {"coins": 0, "items": {}, "fish": {}, "rods": {}, "accessories": {}}
         or_choices = []
 
         def _get_cost_dict(cost_item: Dict, qty: int) -> Dict:
@@ -325,7 +324,7 @@ class ShopService:
             item_id = cost_item.get("cost_item_id")
             quality_level = cost_item.get("quality_level", 0)  # 获取品质等级
             plural_map = {"item": "items", "fish": "fish", "rod": "rods", "accessory": "accessories"}
-            if cost_type in ["coins", "premium"]:
+            if cost_type == "coins":
                 return {cost_type: amount}
             elif cost_type in plural_map and item_id:
                 if cost_type == "fish" and quality_level > 0:
@@ -356,7 +355,6 @@ class ShopService:
         """获取用户当前可用资源的快照字典，支持鱼类品质"""
         resources = {
             "coins": user.coins,
-            "premium": user.premium_currency,
             "items": self.inventory_repo.get_user_item_inventory(user.user_id),
             "fish": {}, # 结构: {fish_id: {quality_level: count}}
             "rods": {},
@@ -390,9 +388,6 @@ class ShopService:
         
         if res_copy.get("coins", 0) < cost.get("coins", 0): return (False, None)
         res_copy["coins"] -= cost.get("coins", 0)
-
-        if res_copy.get("premium", 0) < cost.get("premium", 0): return (False, None)
-        res_copy["premium"] -= cost.get("premium", 0)
 
         for category in ["items", "rods", "accessories"]:
             if category in cost:
@@ -446,10 +441,6 @@ class ShopService:
         # 检查金币
         if costs.get("coins", 0) > 0 and user.coins < costs["coins"]:
             return {"success": False, "message": f"金币不足，需要 {costs['coins']} 金币"}
-        
-        # 检查高级货币
-        if costs.get("premium", 0) > 0 and user.premium_currency < costs["premium"]:
-            return {"success": False, "message": f"高级货币不足，需要 {costs['premium']}"}
         
         # 检查道具
         if costs.get("items"):
@@ -523,10 +514,6 @@ class ShopService:
         # 扣除金币
         if costs.get("coins", 0) > 0:
             user.coins -= costs["coins"]
-        
-        # 扣除高级货币
-        if costs.get("premium", 0) > 0:
-            user.premium_currency -= costs["premium"]
         
         # 更新用户
         self.user_repo.update(user)

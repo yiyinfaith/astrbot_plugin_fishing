@@ -10,7 +10,7 @@ from ..domain.models import User
 from .abstract_repository import AbstractUserRepository
 
 # 累计类字段按增量写回，和其他线程的原子更新（如自动钓鱼扣费）叠加，而不是互相覆盖
-COUNTER_FIELDS = ("coins", "premium_currency", "total_fishing_count", "total_weight_caught", "total_coins_earned")
+COUNTER_FIELDS = ("coins", "total_fishing_count", "total_weight_caught", "total_coins_earned")
 # 读取时的字段快照，update 时据此只写变化的字段
 _SNAPSHOT_ATTR = "_db_snapshot"
 
@@ -78,7 +78,6 @@ class SqliteUserRepository(AbstractUserRepository):
             user_id=row["user_id"],
             nickname=row["nickname"],
             coins=row["coins"],
-            premium_currency=row["premium_currency"],
             total_fishing_count=row["total_fishing_count"],
             total_weight_caught=row["total_weight_caught"],
             total_coins_earned=row["total_coins_earned"],
@@ -89,7 +88,6 @@ class SqliteUserRepository(AbstractUserRepository):
             created_at=parse_datetime(row["created_at"]),
             equipped_rod_instance_id=row["equipped_rod_instance_id"],
             equipped_accessory_instance_id=row["equipped_accessory_instance_id"],
-            current_title_id=row["current_title_id"],
             current_bait_id=row["current_bait_id"],
             bait_start_time=parse_datetime(row["bait_start_time"]),
 

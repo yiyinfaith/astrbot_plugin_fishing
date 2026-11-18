@@ -1,8 +1,7 @@
 import os
 import time
-from astrbot.api.event import filter, AstrMessageEvent
+from astrbot.api.event import AstrMessageEvent
 from astrbot.core.message.components import At
-from astrbot.api import logger
 from ..draw.rank import draw_fishing_ranking
 from ..utils import parse_target_user_id
 
@@ -30,7 +29,7 @@ async def ranking(plugin: "FishingPlugin", event: AstrMessageEvent):
         elif sort_key in ["历史", "最高", "max", "history", "历史最高"]:
             ranking_type = "max_coins"
 
-    # 1. 从服务层获取基础排行榜数据（现在已包含 user_id 和 current_title_id）
+    # 1. 从服务层获取排行榜数据
     user_data = plugin.user_service.get_leaderboard_data(sort_by=ranking_type).get(
         "leaderboard", []
     )
@@ -39,13 +38,12 @@ async def ranking(plugin: "FishingPlugin", event: AstrMessageEvent):
         yield event.plain_result("❌ 当前没有排行榜数据。")
         return
 
-    # 2. 遍历列表，为每个用户查询并填充装备和称号的【名称】
+    # 2. 查询装备名称
     for user_dict in user_data:
         user_id = user_dict.get("user_id")
 
         # 如果（因为某些意外）没有 user_id，则跳过查询，使用默认值
         if not user_id:
-            user_dict["title"] = "无称号"
             user_dict["fishing_rod"] = "无鱼竿"
             user_dict["accessory"] = "无饰品"
             user_dict["total_weight_caught"] = user_dict.get("total_weight_caught", 0)
@@ -70,14 +68,6 @@ async def ranking(plugin: "FishingPlugin", event: AstrMessageEvent):
             if accessory_template:
                 accessory_name = accessory_template.name
         user_dict["accessory"] = accessory_name
-
-        # 获取称号名称
-        title_name = "无称号"
-        if current_title_id := user_dict.get("current_title_id"):
-            title_info = plugin.item_template_repo.get_title_by_id(current_title_id)
-            if title_info:
-                title_name = title_info.name
-        user_dict["title"] = title_name
 
         # 确保重量字段存在，以防万一
         user_dict["total_weight_caught"] = user_dict.get("total_weight_caught", 0)
@@ -210,57 +200,3 @@ async def dispel_protection(plugin: "FishingPlugin", event: AstrMessageEvent):
         yield event.plain_result(f"✅ 使用了【{dispel_item.name}】！{result['message']}")
     else:
         yield event.plain_result(result["message"])
-
-
-async def view_titles(plugin: "FishingPlugin", event: AstrMessageEvent):
-    """查看用户称号"""
-    user_id = plugin._get_effective_user_id(event)
-    titles = plugin.user_service.get_user_titles(user_id).get("titles", [])
-    if titles:
-        message = "【🏅 您的称号】\n"
-        for title in titles:
-            status = " (当前装备)" if title["is_current"] else ""
-            message += f"- {title['name']} (ID: {title['title_id']}){status}\n- 描述: {title['description']}\n\n"
-        yield event.plain_result(message)
-    else:
-        yield event.plain_result("❌ 您还没有任何称号，快去完成成就或参与活动获取吧！")
-
-
-async def use_title(plugin: "FishingPlugin", event: AstrMessageEvent):
-    """使用称号"""
-    user_id = plugin._get_effective_user_id(event)
-    args = event.message_str.split(" ")
-    if len(args) < 2:
-        yield event.plain_result("❌ 请指定要使用的称号 ID，例如：/使用称号 1")
-        return
-    title_id_str = args[1]
-    if not title_id_str.isdigit():
-        yield event.plain_result("❌ 称号 ID 必须是数字，请检查后重试。")
-        return
-    result = plugin.user_service.use_title(user_id, int(title_id_str))
-    yield event.plain_result(result["message"])
-
-
-async def view_achievements(plugin: "FishingPlugin", event: AstrMessageEvent):
-    """查看用户成就"""
-    from ..utils import safe_datetime_handler
-
-    user_id = plugin._get_effective_user_id(event)
-    achievements = plugin.achievement_service.get_user_achievements(user_id).get(
-        "achievements", []
-    )
-    if achievements:
-        message = "【🏆 您的成就】\n"
-        for ach in achievements:
-            message += f"- {ach['name']} (ID: {ach['id']})\n"
-            message += f"  描述: {ach['description']}\n"
-            if ach.get("completed_at"):
-                message += f"  完成时间: {safe_datetime_handler(ach['completed_at'])}\n"
-            else:
-                message += "  进度: {}/{}\n".format(
-                    ach.get("progress", 0), ach.get("target", 1)
-                )
-        message += "请继续努力完成更多成就！"
-        yield event.plain_result(message)
-    else:
-        yield event.plain_result("❌ 您还没有任何成就，快去完成任务或参与活动获取吧！")

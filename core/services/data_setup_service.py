@@ -8,7 +8,6 @@ from ..initial_data import (
     BAIT_DATA,
     ROD_DATA,
     ACCESSORY_DATA,
-    TITLE_DATA,
     GACHA_POOL,
     GACHA_POOL_ITEMS,
     ITEM_DATA,
@@ -126,15 +125,6 @@ class DataSetupService:
             })
 
 
-        for title in TITLE_DATA:
-            if hasattr(self.item_template_repo, "add_title_template"):
-                self.item_template_repo.add_title_template({
-                    "title_id": title[0],
-                    "name": title[1],
-                    "description": title[2],
-                    "display_format": title[3]
-                })
-
         for pool in GACHA_POOL:
             self.gacha_repo.add_pool_template(
                 {
@@ -142,7 +132,6 @@ class DataSetupService:
                     "name": pool[1],
                     "description": pool[2],
                     "cost_coins": pool[3],
-                    "cost_premium_currency": pool[4],
                 }
             )
 

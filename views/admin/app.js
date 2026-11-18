@@ -31,7 +31,6 @@ const NAV = [
   ['gacha', '抽卡池', 'gift'],
   ['zones', '钓鱼区域', 'waves'],
   ['templates', '物品模板', 'package'],
-  ['titles', '称号', 'trophy'],
   ['ops', '全服操作', 'wrench'],
 ];
 
@@ -44,7 +43,6 @@ const ICONS = {
   gift: 'M22,12V20A2,2 0 0,1 20,22H4A2,2 0 0,1 2,20V12A1,1 0 0,1 1,11V8A2,2 0 0,1 3,6H6.17C6.06,5.69 6,5.35 6,5A3,3 0 0,1 9,2C10,2 10.88,2.5 11.43,3.24V3.23L12,4L12.57,3.23V3.24C13.12,2.5 14,2 15,2A3,3 0 0,1 18,5C18,5.35 17.94,5.69 17.83,6H21A2,2 0 0,1 23,8V11A1,1 0 0,1 22,12M4,20H11V12H4V20M20,20V12H13V20H20M9,4A1,1 0 0,0 8,5A1,1 0 0,0 9,6A1,1 0 0,0 10,5A1,1 0 0,0 9,4M15,4A1,1 0 0,0 14,5A1,1 0 0,0 15,6A1,1 0 0,0 16,5A1,1 0 0,0 15,4M3,8V10H11V8H3M13,8V10H21V8H13Z',
   waves: 'M2,18C4.22,17 6.44,16 8.67,16C10.89,16 13.11,18 15.33,18C17.56,18 19.78,16 22,16V19C19.78,19 17.56,21 15.33,21C13.11,21 10.89,19 8.67,19C6.44,19 4.22,20 2,21V18M2,12C4.22,11 6.44,10 8.67,10C10.89,10 13.11,12 15.33,12C17.56,12 19.78,10 22,10V13C19.78,13 17.56,15 15.33,15C13.11,15 10.89,13 8.67,13C6.44,13 4.22,14 2,15V12M2,6C4.22,5 6.44,4 8.67,4C10.89,4 13.11,6 15.33,6C17.56,6 19.78,4 22,4V7C19.78,7 17.56,9 15.33,9C13.11,9 10.89,7 8.67,7C6.44,7 4.22,8 2,9V6Z',
   package: 'M2,10.96C1.5,10.68 1.35,10.07 1.63,9.59L3.13,7C3.24,6.8 3.41,6.66 3.6,6.58L11.43,2.18C11.59,2.06 11.79,2 12,2C12.21,2 12.41,2.06 12.57,2.18L20.47,6.62C20.66,6.72 20.82,6.88 20.91,7.08L22.36,9.6C22.64,10.08 22.47,10.69 22,10.96L21,11.54V16.5C21,16.88 20.79,17.21 20.47,17.38L12.57,21.82C12.41,21.94 12.21,22 12,22C11.79,22 11.59,21.94 11.43,21.82L3.53,17.38C3.21,17.21 3,16.88 3,16.5V10.96C2.7,11.13 2.32,11.14 2,10.96M12,4.15V4.15L12,10.85V10.85L17.96,7.5L12,4.15M5,15.91L11,19.29V12.58L5,9.21V15.91M19,15.91V12.69L14,15.59C13.67,15.77 13.3,15.76 13,15.6V19.29L19,15.91M13.85,13.36L20.13,9.73L19.55,8.72L13.27,12.35L13.85,13.36Z',
-  trophy: 'M18 2C17.1 2 16 3 16 4H8C8 3 6.9 2 6 2H2V11C2 12 3 13 4 13H6.2C6.6 15 7.9 16.7 11 17V19.08C8 19.54 8 22 8 22H16C16 22 16 19.54 13 19.08V17C16.1 16.7 17.4 15 17.8 13H20C21 13 22 12 22 11V2H18M6 11H4V4H6V11M20 11H18V4H20V11Z',
   wrench: 'M22.7,19L13.6,9.9C14.5,7.6 14,4.9 12.1,3C10.1,1 7.1,0.6 4.7,1.7L9,6L6,9L1.6,4.7C0.4,7.1 0.9,10.1 2.9,12.1C4.8,14 7.5,14.5 9.8,13.6L18.9,22.7C19.3,23.1 19.9,23.1 20.3,22.7L22.6,20.4C23.1,20 23.1,19.3 22.7,19Z',
   refresh: 'M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z',
   plus: 'M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z',
@@ -57,7 +55,7 @@ const ICONS = {
 };
 const icon = name => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="${ICONS[name]}"/></svg>`;
 
-const TYPE_LABELS = { fish: '鱼类', rod: '鱼竿', bait: '鱼饵', accessory: '饰品', item: '道具', coins: '金币', premium: '高级货币', titles: '称号' };
+const TYPE_LABELS = { fish: '鱼类', rod: '鱼竿', bait: '鱼饵', accessory: '饰品', item: '道具', coins: '金币' };
 const SHOP_TYPES = { normal: '普通商店', premium: '高级商店', limited: '限时商店' };
 const SYSTEM_USERS = new Set(['MARKET']);
 const SENTIMENT = { panic: '恐慌', pessimistic: '悲观', neutral: '中性', optimistic: '乐观', euphoric: '狂热' };
@@ -237,7 +235,6 @@ const LOADERS = {
   },
   zones: async () => { state.data.zones = await get('zones'); },
   templates: async () => { state.data.templates = await get('templates', { kind: state.templates.kind }); },
-  titles: async () => { state.data.titles = await get('titles'); },
   ops: async () => {},
 };
 
@@ -273,7 +270,7 @@ function overviewView() {
   const market = o.market || {};
   const contentRows = [
     ['鱼类模板', c.fish, 'templates', 'fish'], ['鱼竿模板', c.rods, 'templates', 'rods'], ['鱼饵模板', c.baits, 'templates', 'baits'],
-    ['饰品模板', c.accessories, 'templates', 'accessories'], ['道具模板', c.items, 'templates', 'items'], ['称号', c.titles, 'titles', ''],
+    ['饰品模板', c.accessories, 'templates', 'accessories'], ['道具模板', c.items, 'templates', 'items'],
   ].map(([label, value, tab, kind]) => `<div class="row"><h4>${label}</h4><button type="button" class="btn text" data-action="goto" data-tab="${tab}" data-kind="${kind}">${fmt(value)} 条</button></div>`).join('');
   const runRows = [
     ['钓鱼区域', `${fmt(c.active_zones)} / ${fmt(c.zones)} 个开放`, 'zones'],
@@ -284,7 +281,6 @@ function overviewView() {
     <section class="grid metrics">
       ${metric('注册玩家', fmt(o.users), `${fmt(o.auto_fishing_users)} 人开启自动钓鱼`)}
       ${metric('金币总量', fmt(o.coins_total), `人均 ${fmt(avg(o.coins_total))}`)}
-      ${metric('高级货币总量', fmt(o.premium_total), `人均 ${fmt(avg(o.premium_total))}`)}
       ${metric('市场挂单', fmt(market.total_listings), `鱼竿 ${fmt(market.rod_count)} · 饰品 ${fmt(market.accessory_count)} · 鱼 ${fmt(market.fish_count)}`)}
     </section>
     <section class="grid two">
@@ -313,22 +309,21 @@ function usersView() {
     return `<tr>
       <td><strong>${esc(u.nickname || '未设置昵称')}</strong>${system ? ` ${badge('系统', 'off')}` : ''}<span class="cell-sub">${esc(u.user_id)}</span></td>
       <td class="num">${fmt(u.coins)}</td>
-      <td class="num">${fmt(u.premium_currency)}</td>
       <td class="num">${fmt(u.total_fishing_count)}</td>
       <td>${u.auto_fishing_enabled ? badge('自动钓鱼', 'good') : badge('手动', 'off')}</td>
       <td class="nowrap">${time(u.last_login_time)}<span class="cell-sub">注册 ${time(u.created_at)}</span></td>
       <td>${rowActions(system ? [act('详情', 'user-detail', { id: u.user_id }), act('库存', 'user-inventory', { id: u.user_id })] : [
-        act('详情', 'user-detail', { id: u.user_id }), act('编辑', 'user-edit', { id: u.user_id }), act('货币', 'user-currency', { id: u.user_id }),
+        act('详情', 'user-detail', { id: u.user_id }), act('编辑', 'user-edit', { id: u.user_id }), act('金币', 'user-currency', { id: u.user_id }),
         act('库存', 'user-inventory', { id: u.user_id }), act('删除', 'user-delete', { id: u.user_id }, true),
       ])}</td></tr>`;
   });
-  return shell('玩家', '搜索玩家、调整资产、管理库存与称号。', `<div class="panel">
+  return shell('玩家', '搜索玩家、调整金币和管理库存。', `<div class="panel">
     <form class="toolbar" data-filter="users">
       <input class="grow" name="search" value="${esc(state.users.search)}" placeholder="搜索用户 ID 或昵称" aria-label="搜索玩家">
       <button type="submit" class="btn tonal">查询</button>
       <button type="button" class="btn primary" data-action="user-create">${icon('plus')}新建玩家</button>
     </form>
-    ${table(['玩家', { label: '金币', cls: 'num' }, { label: '高级货币', cls: 'num' }, { label: '钓鱼次数', cls: 'num' }, '状态', '最后签到', '操作'], rows, '没有匹配的玩家。')}
+    ${table(['玩家', { label: '金币', cls: 'num' }, { label: '钓鱼次数', cls: 'num' }, '状态', '最后签到', '操作'], rows, '没有匹配的玩家。')}
     ${pagination(d.pagination, 'users')}
   </div>`);
 }
@@ -339,7 +334,6 @@ function userFormBody(u = {}) {
     ${field({ name: 'user_id', label: '用户 ID', value: u.user_id || '', required: true, attrs: u.user_id ? 'readonly' : '', hint: u.user_id ? '' : '平台上的用户 ID，例如 QQ 号' })}
     ${field({ name: 'nickname', label: '昵称', value: u.nickname || '', attrs: 'maxlength="32"' })}
     ${field({ name: 'coins', label: '金币', type: 'number', value: u.coins ?? '', min: 0, placeholder: u.user_id ? '' : '留空使用初始金币' })}
-    ${field({ name: 'premium_currency', label: '高级货币', type: 'number', value: u.premium_currency ?? 0, min: 0 })}
     ${field({ name: 'total_fishing_count', label: '钓鱼次数', type: 'number', value: u.total_fishing_count ?? 0, min: 0 })}
     ${field({ name: 'total_weight_caught', label: '总重量 (g)', type: 'number', value: u.total_weight_caught ?? 0, min: 0 })}
     ${field({ name: 'total_coins_earned', label: '累计赚取金币', type: 'number', value: u.total_coins_earned ?? 0, min: 0 })}
@@ -353,27 +347,22 @@ function userFormBody(u = {}) {
 async function openUserDetail(userId) {
   const d = await get('users/detail', { user_id: userId });
   const u = d.user;
-  const titleRows = (d.titles || []).map(t => `<div class="row"><div><h4>${esc(t.name)} ${t.is_current ? badge('佩戴中', 'good') : ''}</h4><p>${esc(t.description || '')}</p></div><button type="button" class="btn text danger" data-action="title-revoke" data-user="${esc(u.user_id)}" data-name="${esc(t.name)}">移除</button></div>`).join('') || '<div class="empty">还没有称号。</div>';
-  const titleChoices = [['', '选择要授予的称号'], ...(state.catalog?.titles || []).map(t => [t.name, t.name])];
   openDialog({
-    form: 'title-grant', title: u.nickname || u.user_id, subtitle: `用户 ID：${u.user_id}`, size: 'wide', submit: '授予称号', userId: u.user_id,
+    form: 'user-detail', title: u.nickname || u.user_id, subtitle: `用户 ID：${u.user_id}`, size: 'wide', submit: '', cancel: '关闭',
     body: () => `<dl class="info-grid">
-      ${[['金币', fmt(u.coins)], ['高级货币', fmt(u.premium_currency)], ['历史最高金币', fmt(u.max_coins)], ['累计赚取金币', fmt(u.total_coins_earned)],
+      ${[['金币', fmt(u.coins)], ['历史最高金币', fmt(u.max_coins)], ['累计赚取金币', fmt(u.total_coins_earned)],
         ['钓鱼次数', fmt(u.total_fishing_count)], ['总重量', `${fmt(u.total_weight_caught)} g`], ['鱼塘容量', fmt(u.fish_pond_capacity)],
         ['当前区域', `#${u.fishing_zone_id}`], ['自动钓鱼', u.auto_fishing_enabled ? '已开启' : '已关闭'],
         ['装备鱼竿', d.equipped_rod ? `${d.equipped_rod.name} +${d.equipped_rod.refine_level}` : '无'], ['装备饰品', d.equipped_accessory ? `${d.equipped_accessory.name} +${d.equipped_accessory.refine_level}` : '无'],
-        ['当前称号', d.current_title || '无'], ['连续签到', `${fmt(u.consecutive_login_days)} 天`], ['注册时间', time(u.created_at)], ['最后签到', time(u.last_login_time)]].map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}
-    </dl>
-    <div class="modal-section">称号</div><div class="list-card">${titleRows}</div>
-    <div class="form-grid" style="margin-top:12px">${selectField({ name: 'title_name', label: '授予称号', choices: titleChoices, cls: 'full' })}</div>`,
+        ['连续签到', `${fmt(u.consecutive_login_days)} 天`], ['注册时间', time(u.created_at)], ['最后签到', time(u.last_login_time)]].map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}
+    </dl>`,
   });
 }
 
 function openCurrencyDialog(user) {
   openDialog({
-    form: 'user-currency', title: '调整货币', subtitle: `${user.nickname || user.user_id}：金币 ${fmt(user.coins)}，高级货币 ${fmt(user.premium_currency)}`, userId: user.user_id, submit: '确认调整',
+    form: 'user-currency', title: '调整金币', subtitle: `${user.nickname || user.user_id}：金币 ${fmt(user.coins)}`, userId: user.user_id, submit: '确认调整',
     body: () => `<div class="form-grid">
-      ${selectField({ name: 'currency', label: '货币', choices: [['coins', '金币'], ['premium_currency', '高级货币']] })}
       ${selectField({ name: 'mode', label: '方式', choices: [['add', '增加'], ['subtract', '扣除'], ['set', '设置为']] })}
       ${field({ name: 'amount', label: '数量', type: 'number', min: 0, required: true, cls: 'full', hint: '扣除超过余额时扣到 0 为止。' })}
     </div>`,
@@ -484,14 +473,14 @@ function shopDetailView() {
   `<button type="button" class="btn text" data-action="shop-edit" data-id="${s.shop_id}">编辑商店</button><button type="button" class="btn primary" data-action="shop-item-create">${icon('plus')}添加商品</button>`);
 }
 
-const COST_TYPES = [['coins', '金币'], ['premium', '高级货币'], ['fish', '鱼类'], ['item', '道具'], ['rod', '鱼竿'], ['accessory', '饰品']];
+const COST_TYPES = [['coins', '金币'], ['fish', '鱼类'], ['item', '道具'], ['rod', '鱼竿'], ['accessory', '饰品']];
 const REWARD_TYPES = [['rod', '鱼竿'], ['bait', '鱼饵'], ['accessory', '饰品'], ['item', '道具'], ['fish', '鱼类']];
 
 function costRow(c, i) {
   const type = c.cost_type || 'coins';
   return `<div class="editor-row" data-scope data-cost-row>
     <select name="cost_type" aria-label="消耗类型" data-item-target="[data-role=item]">${options(COST_TYPES, type)}</select>
-    <div data-show-for="fish item rod accessory"><select name="cost_item_id" data-role="item" aria-label="消耗物品">${itemSelectOptions(['coins', 'premium'].includes(type) ? 'fish' : type, c.cost_item_id || '')}</select></div>
+    <div data-show-for="fish item rod accessory"><select name="cost_item_id" data-role="item" aria-label="消耗物品">${itemSelectOptions(type === 'coins' ? 'fish' : type, c.cost_item_id || '')}</select></div>
     <input name="cost_amount" type="number" min="1" value="${esc(c.cost_amount ?? 1)}" placeholder="数量" aria-label="数量">
     <select name="cost_relation" aria-label="关系">${options([['and', '必须'], ['or', '可选']], c.cost_relation || 'and')}</select>
     <input name="group_id" type="number" min="1" value="${esc(c.group_id ?? '')}" placeholder="组 ID" aria-label="组 ID">
@@ -573,19 +562,17 @@ function openShopItemDialog(row) {
 function gachaView() {
   if (state.sub?.type === 'pool') return poolDetailView();
   const rows = (state.data.gacha?.rows || []).map(p => {
-    const cost = p.cost_premium_currency ? `${fmt(p.cost_premium_currency)} 高级货币` : p.cost_coins ? `${fmt(p.cost_coins)} 金币` : '免费';
+    const cost = p.cost_coins ? `${fmt(p.cost_coins)} 金币` : '免费';
     return `<tr><td>#${p.gacha_pool_id}</td><td><strong>${esc(p.name)}</strong><span class="cell-sub">${esc(p.description || '')}</span></td><td class="num">${cost}</td><td>${p.is_limited_time ? `${badge('限时', 'warn')}<span class="cell-sub">截止 ${time(p.open_until)}</span>` : badge('常驻', 'off')}</td><td class="num">${fmt(p.item_count)}</td><td>${rowActions([act('物品', 'pool-open', { id: p.gacha_pool_id }), act('编辑', 'pool-edit', { id: p.gacha_pool_id }), act('复制', 'pool-copy', { id: p.gacha_pool_id, name: p.name }), act('删除', 'pool-delete', { id: p.gacha_pool_id, name: p.name }, true)])}</td></tr>`;
   });
   return shell('抽卡池', '玩家使用“抽卡 卡池ID”“十连 卡池ID”抽取。', `<div class="panel">${table(['ID', '卡池', { label: '单抽消耗', cls: 'num' }, '开放', { label: '物品数', cls: 'num' }, '操作'], rows, '还没有卡池。')}</div>`, `<button type="button" class="btn primary" data-action="pool-create">${icon('plus')}新建卡池</button>`);
 }
 
 function poolFormBody(p = {}) {
-  const currency = p.cost_premium_currency ? 'premium' : 'coins';
   return `<div class="form-grid">
     ${field({ name: 'name', label: '卡池名称', value: p.name || '', required: true, cls: 'full' })}
     ${field({ name: 'description', label: '描述', type: 'textarea', value: p.description || '', cls: 'full' })}
-    ${selectField({ name: 'currency_type', label: '消耗货币', choices: [['coins', '金币'], ['premium', '高级货币']], value: currency })}
-    ${field({ name: 'cost_amount', label: '单抽消耗', type: 'number', min: 0, value: (currency === 'premium' ? p.cost_premium_currency : p.cost_coins) ?? 0, hint: '0 表示免费' })}
+    ${field({ name: 'cost_amount', label: '单抽消耗金币', type: 'number', min: 0, value: p.cost_coins ?? 0, hint: '0 表示免费' })}
     ${switchField({ name: 'is_limited_time', label: '限时开放', checked: !!p.is_limited_time })}
     ${field({ name: 'open_until', label: '开放截止时间', type: 'datetime-local', value: toLocalInput(p.open_until), hint: '仅在限时开放时生效' })}
   </div>`;
@@ -606,8 +593,8 @@ function openPoolItemDialog(item) {
   openDialog({
     form: 'pool-item', title: item ? '编辑卡池物品' : '添加卡池物品', subtitle: state.data.pool.pool.name, itemPoolId: item?.gacha_pool_item_id || '',
     body: () => `<div class="form-grid" data-scope>
-      ${selectField({ name: 'item_type', label: '物品类型', choices: [['rod', '鱼竿'], ['accessory', '饰品'], ['bait', '鱼饵'], ['item', '道具'], ['titles', '称号'], ['coins', '金币']], value: type, attrs: 'data-item-target="[data-role=item]"' })}
-      <div class="field" data-show-for="rod accessory bait item titles"><label for="f_item_id">物品</label><select id="f_item_id" name="item_id" data-role="item">${itemSelectOptions(type === 'coins' ? 'rod' : type, item?.item_id || '')}</select></div>
+      ${selectField({ name: 'item_type', label: '物品类型', choices: [['rod', '鱼竿'], ['accessory', '饰品'], ['bait', '鱼饵'], ['item', '道具'], ['coins', '金币']], value: type, attrs: 'data-item-target="[data-role=item]"' })}
+      <div class="field" data-show-for="rod accessory bait item"><label for="f_item_id">物品</label><select id="f_item_id" name="item_id" data-role="item">${itemSelectOptions(type === 'coins' ? 'rod' : type, item?.item_id || '')}</select></div>
       ${field({ name: 'quantity', label: '数量', type: 'number', min: 1, value: item?.quantity ?? 1, hint: '金币填发放的金币数' })}
       ${field({ name: 'weight', label: '权重', type: 'number', min: 1, value: item?.weight ?? 10, hint: '数字越大越容易抽到' })}
     </div>`,
@@ -759,32 +746,14 @@ function csvTemplate(spec) {
 }
 
 // ---------------------------------------------------------------------------
-// 称号
-// ---------------------------------------------------------------------------
-
-function titlesView() {
-  const rows = (state.data.titles?.rows || []).map(t => `<tr><td>#${t.title_id}</td><td><strong>${esc(t.name)}</strong></td><td class="wrap-text">${esc(t.description || '')}</td><td><code class="code">${esc(t.display_format || '{name}')}</code></td><td>${rowActions([act('编辑', 'title-edit', { id: t.title_id }), act('删除', 'title-delete', { id: t.title_id, name: t.name }, true)])}</td></tr>`);
-  return shell('称号', '成就会自动发放部分称号；在玩家详情里可以手动授予或移除。', `<div class="panel">${table(['ID', '名称', '描述', '显示格式', '操作'], rows, '还没有称号。')}</div>`, `<button type="button" class="btn primary" data-action="title-create">${icon('plus')}新建称号</button>`);
-}
-
-function titleFormBody(t = {}) {
-  return `<div class="form-grid">
-    ${field({ name: 'name', label: '称号名称', value: t.name || '', required: true, cls: 'full' })}
-    ${field({ name: 'description', label: '描述', type: 'textarea', value: t.description || '', cls: 'full', placeholder: '留空时自动生成' })}
-    ${field({ name: 'display_format', label: '显示格式', value: t.display_format || '{name}', cls: 'full', hint: '{name} 为称号名，{username} 为玩家昵称' })}
-  </div>`;
-}
-
-// ---------------------------------------------------------------------------
 // 全服操作
 // ---------------------------------------------------------------------------
 
 function opsView() {
   return shell('全服操作', '原管理员指令对应的批量操作。系统账号（如市场托管）不参与。', `<div class="stack">
     <section class="grid two">
-      <div class="panel"><h3>全体货币</h3><p>给所有玩家发放或扣除金币、高级货币。扣除时余额不足的扣到 0。</p>
+      <div class="panel"><h3>全体金币</h3><p>给所有玩家发放或扣除金币。扣除时余额不足的扣到 0。</p>
         <form data-form="broadcast-currency" novalidate><div class="form-grid">
-          ${selectField({ name: 'currency', label: '货币', choices: [['coins', '金币'], ['premium_currency', '高级货币']] })}
           ${selectField({ name: 'mode', label: '操作', choices: [['add', '发放'], ['subtract', '扣除']] })}
           ${field({ name: 'amount', label: '每人数量', type: 'number', min: 1, required: true, cls: 'full' })}
         </div><div class="form-actions" style="margin-top:16px"><button type="submit" class="btn primary">执行</button></div></form></div>
@@ -801,7 +770,7 @@ function opsView() {
 
 function openBroadcastDialog(kind) {
   if (kind === 'currency') {
-    openDialog({ form: 'broadcast-currency', title: '全体发放金币', subtitle: '给所有玩家发放或扣除货币', submit: '执行', body: () => `<div class="form-grid">${selectField({ name: 'currency', label: '货币', choices: [['coins', '金币'], ['premium_currency', '高级货币']] })}${selectField({ name: 'mode', label: '操作', choices: [['add', '发放'], ['subtract', '扣除']] })}${field({ name: 'amount', label: '每人数量', type: 'number', min: 1, required: true, cls: 'full' })}</div>` });
+    openDialog({ form: 'broadcast-currency', title: '全体发放金币', subtitle: '给所有玩家发放或扣除金币', submit: '执行', body: () => `<div class="form-grid">${selectField({ name: 'mode', label: '操作', choices: [['add', '发放'], ['subtract', '扣除']] })}${field({ name: 'amount', label: '每人数量', type: 'number', min: 1, required: true, cls: 'full' })}</div>` });
   } else {
     openDialog({ form: 'broadcast-item', title: '全体发放物品', subtitle: '给所有玩家发放同一种物品', submit: '发放', body: () => itemPickerFields() });
   }
@@ -811,7 +780,7 @@ function openBroadcastDialog(kind) {
 // 渲染
 // ---------------------------------------------------------------------------
 
-const VIEWS = { overview: overviewView, users: usersView, market: marketView, shops: shopsView, gacha: gachaView, zones: zonesView, templates: templatesView, titles: titlesView, ops: opsView };
+const VIEWS = { overview: overviewView, users: usersView, market: marketView, shops: shopsView, gacha: gachaView, zones: zonesView, templates: templatesView, ops: opsView };
 
 function render() {
   closeMenu();
@@ -867,7 +836,6 @@ const ACTIONS = {
   'user-currency': b => openCurrencyDialog(findUser(b.dataset.id)),
   'user-inventory': async b => { state.sub = { type: 'inventory', user_id: b.dataset.id }; await refresh(); window.scrollTo(0, 0); },
   'user-delete': b => { const u = findUser(b.dataset.id); confirmAction({ title: '删除玩家', message: `确定删除 ${u.nickname || u.user_id}（${u.user_id}）吗？其库存、记录都会一并删除，且无法恢复。`, label: '删除玩家', run: async () => { const r = await post('users/delete', { user_id: u.user_id }); await refresh(); return r; } }); },
-  'title-revoke': b => confirmAction({ title: '移除称号', message: `确定从 ${b.dataset.user} 移除称号“${b.dataset.name}”吗？`, label: '移除', run: async () => { const r = await post('users/titles/revoke', { user_id: b.dataset.user, title_name: b.dataset.name }); await openUserDetail(b.dataset.user); return r; } }),
   'inv-add': b => openDialog({ form: 'inv-add', title: '添加物品', subtitle: `给 ${state.data.inventory.nickname || b.dataset.user} 添加物品`, userId: b.dataset.user, submit: '添加', body: () => itemPickerFields() }),
   'inv-remove': b => openDialog({ form: 'inv-remove', title: '移除物品', subtitle: `${TYPE_LABELS[b.dataset.type]} #${b.dataset.item}`, userId: b.dataset.user, itemType: b.dataset.type, itemId: b.dataset.item, submit: '移除', danger: true, body: () => `<div class="form-grid">${field({ name: 'quantity', label: '移除数量', type: 'number', min: 1, max: b.dataset.max, value: 1, cls: 'full', hint: `当前持有 ${b.dataset.max}${['rod', 'accessory'].includes(b.dataset.type) ? '（同种装备按数量依次移除）' : ''}` })}</div>` }),
   'rod-edit': b => openDialog({ form: 'rod-edit', title: '编辑鱼竿', subtitle: `实例 #${b.dataset.id}`, userId: b.dataset.user, instanceId: b.dataset.id, body: () => `<div class="form-grid">${field({ name: 'refine_level', label: '精炼等级', type: 'number', min: 1, max: 10, value: b.dataset.refine })}${field({ name: 'durability', label: '耐久度', type: 'number', min: 0, value: b.dataset.durability, hint: '留空表示无限耐久' })}</div>` }),
@@ -913,11 +881,6 @@ const ACTIONS = {
   'template-delete': b => { const spec = state.meta.template_kinds[state.templates.kind]; confirmAction({ title: `删除${spec.label}`, message: `确定删除「${b.dataset.name}」吗？删除后无法恢复。`, label: '删除', run: async () => { const r = await post('templates/delete', { kind: state.templates.kind, id: b.dataset.id }); await loadCatalog(); await refresh(); return r; } }); },
   'template-csv': () => { const spec = state.meta.template_kinds[state.templates.kind]; download(`${state.templates.kind}_template.csv`, csvTemplate(spec)); notify(`已下载${spec.label} CSV 模板`); },
 
-  // 称号
-  'title-create': () => openDialog({ form: 'title', title: '新建称号', submit: '创建', body: () => titleFormBody() }),
-  'title-edit': b => { const t = state.data.titles.rows.find(x => x.title_id === Number(b.dataset.id)); openDialog({ form: 'title', title: '编辑称号', subtitle: t.name, titleId: t.title_id, body: () => titleFormBody(t) }); },
-  'title-delete': b => confirmAction({ title: '删除称号', message: `确定删除称号「${b.dataset.name}」吗？`, label: '删除', run: async () => { const r = await post('titles/delete', { title_id: b.dataset.id }); await loadCatalog(); await refresh(); return r; } }),
-
   // 全服
   'broadcast-currency': () => openBroadcastDialog('currency'),
   'broadcast-item': () => openBroadcastDialog('item'),
@@ -929,7 +892,6 @@ const FORMS = {
   'user-create': v => post('users/create', { ...v, coins: v.coins === '' ? undefined : v.coins }),
   'user-update': v => post('users/update', v),
   'user-currency': (v, d) => post('users/currency', { ...v, user_id: d.userId }),
-  'title-grant': async (v, d) => { if (!v.title_name) throw new Error('请选择要授予的称号'); const r = await post('users/titles/grant', { user_id: d.userId, title_name: v.title_name }); await openUserDetail(d.userId); notify(r.message || '称号已授予'); return { keepOpen: true }; },
   'inv-add': (v, d) => post('users/inventory/add', { ...v, user_id: d.userId }),
   'inv-remove': (v, d) => post('users/inventory/remove', { quantity: v.quantity, user_id: d.userId, item_type: d.itemType, item_id: d.itemId }),
   'rod-edit': (v, d) => post('users/inventory/rod', { ...v, user_id: d.userId, instance_id: d.instanceId }),
@@ -941,14 +903,13 @@ const FORMS = {
   'pool-item': (v, d) => post('gacha/items/save', { ...v, pool_id: state.data.pool.pool.gacha_pool_id, gacha_pool_item_id: d.itemPoolId }),
   zone: v => post('zones/save', { ...v, rarity_distribution: [0, 1, 2, 3, 4, 5].map(i => v[`rarity_${i}`]), specific_fish_ids: v.specific_fish_ids || [] }),
   template: (v, d) => post('templates/save', { kind: state.templates.kind, id: d.templateId || '', data: v }),
-  title: (v, d) => post('titles/save', { ...v, title_id: d.titleId || '' }),
   'broadcast-currency': v => post('broadcast/currency', v),
   'broadcast-item': v => post('broadcast/item', v),
 };
-// 改动模板、称号、区域后，物品下拉要跟着更新
-const CATALOG_FORMS = new Set(['template', 'title', 'zone', 'user-create']);
+// 改动模板或区域后，更新物品选项
+const CATALOG_FORMS = new Set(['template', 'zone', 'user-create']);
 const CONFIRM_FORMS = {
-  'broadcast-currency': v => `确定给所有玩家${v.mode === 'add' ? '发放' : '扣除'}每人 ${fmt(v.amount)} ${v.currency === 'coins' ? '金币' : '高级货币'}吗？`,
+  'broadcast-currency': v => `确定给所有玩家${v.mode === 'add' ? '发放' : '扣除'}每人 ${fmt(v.amount)} 金币吗？`,
   'broadcast-item': v => `确定给所有玩家发放 ${TYPE_LABELS[v.item_type]} #${v.item_id} ×${v.quantity} 吗？`,
 };
 

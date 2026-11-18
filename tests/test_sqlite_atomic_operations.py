@@ -131,12 +131,6 @@ class SqliteAtomicOperationTests(_ClosesConnectionsMixin, unittest.TestCase):
                     accessory_instance_id INTEGER PRIMARY KEY, user_id TEXT,
                     accessory_id INTEGER, is_equipped INTEGER, is_locked INTEGER
                 );
-                CREATE TABLE fishing_records (
-                    record_id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, fish_id INTEGER,
-                    weight INTEGER, value INTEGER, rod_instance_id INTEGER,
-                    accessory_instance_id INTEGER, bait_id INTEGER,
-                    timestamp DATETIME, is_king_size INTEGER
-                );
                 CREATE TABLE user_fish_stats (
                     user_id TEXT, fish_id INTEGER, first_caught_at DATETIME,
                     last_caught_at DATETIME, max_weight INTEGER, min_weight INTEGER,
@@ -210,26 +204,25 @@ class SqliteAtomicOperationTests(_ClosesConnectionsMixin, unittest.TestCase):
                     1,
                 )
 
-    def test_fishing_settlement_rolls_back_everything_when_log_insert_fails(self):
+    def test_fishing_settlement_rolls_back_everything_when_stats_insert_fails(self):
         with self.temp_workspace() as temp_dir:
             db_path = Path(temp_dir) / "fish.db"
             self._create_database(db_path)
             with _sqlite(db_path) as conn:
                 conn.execute("INSERT INTO user_rods VALUES (7, 'u1', 1, 5, 1, 0)")
                 conn.execute(
-                    "CREATE TRIGGER reject_log BEFORE INSERT ON fishing_records "
-                    "BEGIN SELECT RAISE(ABORT, 'forced log failure'); END"
+                    "CREATE TRIGGER reject_stats BEFORE INSERT ON user_fish_stats "
+                    "BEGIN SELECT RAISE(ABORT, 'forced stats failure'); END"
                 )
 
             repo = self._track(self.inventory_module.SqliteInventoryRepository(str(db_path)))
             with self.assertRaises(sqlite3.IntegrityError):
                 repo.settle_fishing_catch(
                     user_id="u1", fish_id=1, total_catches=1, quality_level=0,
-                    weight=20, base_value=10, earned_value=10, fishing_cost=10,
+                    weight=20, earned_value=10, fishing_cost=10,
                     fish_pond_capacity=10, timestamp=__import__("datetime").datetime.now(),
                     rod_instance_id=7,
                     rod_durability=4, rod_broken=False,
-                    accessory_instance_id=None, bait_id=None,
                 )
 
             with _sqlite(db_path) as conn:

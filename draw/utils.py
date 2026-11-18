@@ -1,8 +1,16 @@
 import os
 import hashlib
+from io import BytesIO
 from typing import Optional
 from PIL import Image, ImageDraw
 from astrbot.api import logger
+from astrbot.api.message_components import Image as MessageImage
+
+
+def image_result(event, image: Image.Image):
+    with BytesIO() as buffer:
+        image.save(buffer, format="PNG")
+        return event.chain_result([MessageImage.fromBytes(buffer.getvalue())])
 
 async def get_user_avatar(user_id: str, data_dir: str, avatar_size: int = 50) -> Optional[Image.Image]:
     """

@@ -29,6 +29,9 @@ REMOVED_COMMANDS = [
     "锁定", "解锁", "状态", "菜单",
     # 改为「钓鱼注册」「钓鱼签到」「钓鱼背包」
     "注册", "签到", "背包", "查看背包", "我的背包",
+    "鱼塘容量", "鱼竿", "鱼饵", "道具", "我的道具", "查看道具", "饰品",
+    "高级货币", "钻石", "星石", "成就", "查看成就", "称号", "查看称号", "使用称号",
+    "钓鱼记录", "钓鱼日志", "钓鱼历史",
 ]
 
 
@@ -64,6 +67,7 @@ class CommandSurfaceTests(unittest.TestCase):
             "core/repositories/bank_sql.py", "core/domain/bank_models.py",
             "handlers/exchange_handlers.py", "core/services/exchange_service.py",
             "core/repositories/sqlite_exchange_repo.py",
+            "core/services/achievement_service.py", "core/repositories/sqlite_achievement_repo.py",
         ):
             self.assertFalse((PLUGIN_DIR / path).exists(), path)
 
@@ -122,10 +126,10 @@ class AdminApiTests(unittest.TestCase):
     def test_fresh_database_has_gacha_items_and_no_wipe_bomb_content(self):
         pools = self.call(self.api.gacha_list)["rows"]
         self.assertGreater(sum(p["item_count"] for p in pools), 0)
-        titles = {t["name"] for t in self.call(self.api.titles_list)["rows"]}
-        for name in ("擦弹之王", "Lucky☆Star", "杂鱼~杂鱼~"):
-            self.assertNotIn(name, titles)
-        items = {i["name"] for i in self.call(self.api.catalog)["item"]}
+        catalog = self.call(self.api.catalog)
+        self.assertNotIn("titles", catalog)
+        self.assertFalse(any("titles" in route[0] for route in self.api.routes()))
+        items = {i["name"] for i in catalog["item"]}
         self.assertNotIn("擦弹许可证", items)
 
     def test_user_currency_modes(self):
@@ -139,12 +143,14 @@ class AdminApiTests(unittest.TestCase):
 
     def test_broadcast_skips_system_accounts(self):
         before = {uid: self.plugin.user_repo.get_by_id(uid) for uid in ("MARKET",)}
-        result = self.call(self.api.broadcast_currency, body={"currency": "premium_currency", "mode": "add", "amount": 7})
+        result = self.call(self.api.broadcast_currency, body={"mode": "add", "amount": 7})
         self.assertEqual(result["affected"], 2)
         for uid, user in before.items():
             after = self.plugin.user_repo.get_by_id(uid)
             if user:
-                self.assertEqual(after.premium_currency, user.premium_currency)
+                self.assertEqual(after.coins, user.coins)
+        with self.assertRaises(self.ApiError):
+            self.call(self.api.broadcast_currency, body={"currency": "premium_currency", "mode": "add", "amount": 7})
 
     def test_zone_create_keeps_specific_fish(self):
         fish = [f["id"] for f in self.call(self.api.catalog)["fish"][:3]]
@@ -227,7 +233,7 @@ class AdminApiTests(unittest.TestCase):
     def test_every_read_endpoint_serializes(self):
         for name, query in (
             ("overview", {}), ("users", {}), ("market", {}),
-            ("shops", {}), ("gacha", {}), ("zones", {}), ("titles", {}), ("meta", {}),
+            ("shops", {}), ("gacha", {}), ("zones", {}), ("meta", {}),
             ("templates", {"kind": "rods"}), ("users/inventory", {"user_id": "1001"}), ("users/detail", {"user_id": "1001"}),
         ):
             fn = next(r[2] for r in self.api.routes() if r[0] == name and r[1] == "GET")
@@ -239,6 +245,7 @@ class DatabaseSchemaTests(unittest.TestCase):
         "bank_accounts", "bank_fixed_deposits", "bank_transactions", "bank_withdraw_reservations",
         "tax_debts", "taxes", "commodities", "exchange_prices", "user_commodities",
         "loans", "red_packets", "red_packet_records", "wipe_bomb_log",
+        "titles", "user_titles", "user_achievement_progress", "fishing_records",
     }
 
     def setUp(self):
@@ -265,6 +272,10 @@ class DatabaseSchemaTests(unittest.TestCase):
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         self.assertFalse(tables & self.LEGACY_TABLES)
         columns = {r[1] for r in conn.execute("PRAGMA table_info(users)")}
+        self.assertFalse({"premium_currency", "current_title_id"} & columns)
+        self.assertIn("user_fish_stats", tables)
+        self.assertNotIn("cost_premium_currency", {r[1] for r in conn.execute("PRAGMA table_info(gacha_pools)")})
+        self.assertNotIn("cost_premium", {r[1] for r in conn.execute("PRAGMA table_info(aquarium_upgrades)")})
         for name in columns:
             self.assertFalse(re.search(r"wipe_bomb|wof_|wheel_of_fate|sicbo|exchange", name), name)
         self.assertEqual(conn.execute("SELECT COUNT(*) FROM fishing_zones").fetchone()[0], 3)
@@ -273,10 +284,9 @@ class DatabaseSchemaTests(unittest.TestCase):
         self.assertFalse({"daily_rare_fish_quota", "rare_fish_caught_today"} & zone_columns)
         self.assertIn("required_rod_rarity", zone_columns)
         conn.close()
-        # 再跑一次不会把自己当成旧库
-        self.assertIsNone(self.migration.retire_legacy_database(str(self.db)))
+        self.migration.run_migrations(str(self.db), self.migrations_dir)
 
-    def test_legacy_database_is_set_aside(self):
+    def test_legacy_database_is_rejected_without_backup(self):
         conn = sqlite3.connect(self.db)
         conn.executescript("""
             CREATE TABLE schema_version (version INTEGER NOT NULL PRIMARY KEY);
@@ -285,12 +295,11 @@ class DatabaseSchemaTests(unittest.TestCase):
             INSERT INTO users VALUES ('old', 5);
         """)
         conn.close()
-        self.migration.run_migrations(str(self.db), self.migrations_dir)
-        backups = list(Path(self.tmp.name).glob("fish.db.legacy-*"))
-        self.assertEqual(len([b for b in backups if not b.name.endswith(("-wal", "-shm"))]), 1)
+        with self.assertRaisesRegex(RuntimeError, "数据库结构"):
+            self.migration.run_migrations(str(self.db), self.migrations_dir)
+        self.assertEqual(list(Path(self.tmp.name).iterdir()), [self.db])
         conn = sqlite3.connect(self.db)
-        self.assertEqual(conn.execute("SELECT COUNT(*) FROM users").fetchone()[0], 0)
-        self.assertEqual(conn.execute("SELECT value FROM db_meta WHERE key = 'schema'").fetchone()[0], "fishing-1.0")
+        self.assertEqual(conn.execute("SELECT * FROM users").fetchall(), [("old", 5)])
         conn.close()
 
 

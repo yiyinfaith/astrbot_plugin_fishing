@@ -149,7 +149,8 @@ class InventoryService:
         enriched_rods.sort(key=lambda x: (
             not x["is_equipped"],  # False (装备中) 排在前面
             -x["rarity"],          # 稀有度降序
-            -x["refine_level"]     # 精炼等级降序
+            -x["refine_level"],    # 精炼等级降序
+            x["instance_id"],
         ))
         
         return {
@@ -210,7 +211,8 @@ class InventoryService:
         enriched_accessories.sort(key=lambda x: (
             not x["is_equipped"],  # False (装备中) 排在前面
             -x["rarity"],          # 稀有度降序
-            -x["refine_level"]     # 精炼等级降序
+            -x["refine_level"],    # 精炼等级降序
+            x["instance_id"],
         ))
         
         return {
@@ -774,6 +776,7 @@ class InventoryService:
             "success": True,
             "fish_pond_capacity": user.fish_pond_capacity,
             "current_fish_count": sum(item.quantity for item in fish_inventory),
+            "total_value": self.inventory_repo.get_fish_inventory_value(user_id),
             "next_capacity": next_upgrade["to"] if next_upgrade else None,
             "next_cost": next_upgrade["cost"] if next_upgrade else None,
         }

@@ -1,7 +1,7 @@
 import sqlite3
 import threading
 from typing import Optional, List, Dict, Any, Set
-from datetime import datetime, timedelta
+from datetime import datetime
 import json
 
 from astrbot.api import logger
@@ -418,24 +418,6 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
 
                 cursor.execute(
                     """
-                    INSERT INTO fishing_records (
-                        user_id, fish_id, weight, value, rod_instance_id,
-                        accessory_instance_id, bait_id, timestamp, is_king_size
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
-                    """,
-                    (
-                        user_id,
-                        fish_id,
-                        settlement["weight"],
-                        settlement["base_value"],
-                        rod_instance_id,
-                        settlement.get("accessory_instance_id"),
-                        settlement.get("bait_id"),
-                        timestamp,
-                    ),
-                )
-                cursor.execute(
-                    """
                     INSERT INTO user_fish_stats (
                         user_id, fish_id, first_caught_at, last_caught_at,
                         max_weight, min_weight, total_caught, total_weight
@@ -456,21 +438,6 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
                         settlement["weight"],
                         settlement["weight"],
                     ),
-                )
-                cursor.execute(
-                    """
-                    DELETE FROM fishing_records
-                    WHERE user_id = ? AND record_id NOT IN (
-                        SELECT record_id FROM fishing_records
-                        WHERE user_id = ?
-                        ORDER BY timestamp DESC, record_id DESC LIMIT 50
-                    )
-                    """,
-                    (user_id, user_id),
-                )
-                cursor.execute(
-                    "DELETE FROM fishing_records WHERE timestamp < ?",
-                    (timestamp - timedelta(days=30),),
                 )
                 conn.commit()
                 return True
@@ -585,19 +552,6 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
                 WHERE user_id = ? AND quantity > 0
             """, (user_id,))
             return [row["bait_id"] for row in cursor.fetchall()]
-
-    def get_user_titles(self, user_id: str) -> List[int]:
-        """
-        获取用户拥有的称号列表。
-        返回一个包含称号ID的列表。
-        """
-        with self._connection_manager.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT title_id FROM user_titles
-                WHERE user_id = ?
-            """, (user_id,))
-            return [row["title_id"] for row in cursor.fetchall()]
 
     def get_random_bait(self, user_id: str) -> Optional[int]:
         """
@@ -909,9 +863,9 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
                 # 如果目标用户不存在，创建一个系统用户
                 if new_user_id == "MARKET":
                     cursor.execute("""
-                        INSERT INTO users (user_id, nickname, coins, premium_currency, created_at)
-                        VALUES (?, ?, ?, ?, ?)
-                    """, (new_user_id, "[系统-市场托管]", 0, 0, datetime.now()))
+                        INSERT INTO users (user_id, nickname, coins, created_at)
+                        VALUES (?, ?, ?, ?)
+                    """, (new_user_id, "[系统-市场托管]", 0, datetime.now()))
                     logger.info(f"自动创建系统用户: {new_user_id}")
                 else:
                     raise ValueError(f"目标用户 {new_user_id} 不存在")
@@ -945,9 +899,9 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
                 # 如果目标用户不存在，创建一个系统用户
                 if new_user_id == "MARKET":
                     cursor.execute("""
-                        INSERT INTO users (user_id, nickname, coins, premium_currency, created_at)
-                        VALUES (?, ?, ?, ?, ?)
-                    """, (new_user_id, "[系统-市场托管]", 0, 0, datetime.now()))
+                        INSERT INTO users (user_id, nickname, coins, created_at)
+                        VALUES (?, ?, ?, ?)
+                    """, (new_user_id, "[系统-市场托管]", 0, datetime.now()))
                     logger.info(f"自动创建系统用户: {new_user_id}")
                 else:
                     raise ValueError(f"目标用户 {new_user_id} 不存在")
@@ -1193,7 +1147,7 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
         with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT upgrade_id, level, capacity, cost_coins, cost_premium, description, created_at
+                SELECT upgrade_id, level, capacity, cost_coins, description, created_at
                 FROM aquarium_upgrades 
                 ORDER BY level
             """)
@@ -1204,7 +1158,7 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
         with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT upgrade_id, level, capacity, cost_coins, cost_premium, description, created_at
+                SELECT upgrade_id, level, capacity, cost_coins, description, created_at
                 FROM aquarium_upgrades 
                 WHERE level = ?
             """, (level,))

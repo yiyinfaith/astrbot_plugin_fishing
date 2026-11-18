@@ -4,7 +4,7 @@ from typing import Optional, List, Dict, Any
 
 # 导入抽象基类和领域模型
 from .abstract_repository import AbstractItemTemplateRepository
-from ..domain.models import Fish, Rod, Bait, Accessory, Title, Item
+from ..domain.models import Fish, Rod, Bait, Accessory, Item
 
 
 def _cooldown_modifier(data: Dict[str, Any]) -> float:
@@ -49,11 +49,6 @@ class SqliteItemTemplateRepository(AbstractItemTemplateRepository):
         if not row:
             return None
         return Accessory(**row)
-
-    def _row_to_title(self, row: sqlite3.Row) -> Optional[Title]:
-        if not row:
-            return None
-        return Title(**row)
 
     def _row_to_item(self, row: sqlite3.Row) -> Optional[Item]:
         if not row:
@@ -236,25 +231,6 @@ class SqliteItemTemplateRepository(AbstractItemTemplateRepository):
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM accessories ORDER BY rarity DESC")
             return [self._row_to_accessory(row) for row in cursor.fetchall()]
-
-    # --- Title Read Methods ---
-    def get_title_by_id(self, title_id: int) -> Optional[Title]:
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM titles WHERE title_id = ?", (title_id,))
-            return self._row_to_title(cursor.fetchone())
-
-    def get_all_titles(self) -> List[Title]:
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM titles ORDER BY title_id")
-            return [self._row_to_title(row) for row in cursor.fetchall()]
-
-    def get_title_by_name(self, name: str) -> Optional[Title]:
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM titles WHERE name = ?", (name,))
-            return self._row_to_title(cursor.fetchone())
 
     # --- Item Read Methods ---
     def get_item_by_id(self, item_id: int) -> Optional[Item]:
@@ -492,29 +468,4 @@ class SqliteItemTemplateRepository(AbstractItemTemplateRepository):
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM items WHERE item_id = ?", (item_id,))
-            conn.commit()
-
-    def add_title_template(self, data: Dict[str, Any]) -> None:
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO titles (title_id, name, description, display_format)
-                VALUES (:title_id, :name, :description, :display_format)
-            """, data)
-            conn.commit()
-
-    def update_title_template(self, title_id: int, data: Dict[str, Any]) -> None:
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE titles
-                SET name = :name, description = :description, display_format = :display_format
-                WHERE title_id = :title_id
-            """, {**data, "title_id": title_id})
-            conn.commit()
-
-    def delete_title_template(self, title_id: int) -> None:
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM titles WHERE title_id = ?", (title_id,))
             conn.commit()

@@ -1,13 +1,12 @@
 """1.0.0 数据库结构。
 
 全新安装时一次建好所有表、索引和必要的初始数据（钓鱼区域、水族箱升级档位）。
-鱼类、装备、道具、称号、商店、卡池等游戏内容由 DataSetupService 写入。
+鱼类、装备、道具、商店、卡池等游戏内容由 DataSetupService 写入。
 """
 
 import sqlite3
 
-# 新库的结构标记。没有这个标记的 fish.db 来自旧版插件，启动时会被改名备份。
-SCHEMA_MARK = "fishing-1.0"
+SCHEMA_MARK = "fishing-1.0.0"
 
 TABLES = [
     """
@@ -21,7 +20,6 @@ TABLES = [
         user_id TEXT PRIMARY KEY,
         nickname TEXT,
         coins INTEGER DEFAULT 200,
-        premium_currency INTEGER DEFAULT 0,
         total_fishing_count INTEGER DEFAULT 0,
         total_weight_caught INTEGER DEFAULT 0,
         total_coins_earned INTEGER DEFAULT 0,
@@ -29,7 +27,6 @@ TABLES = [
         equipped_accessory_instance_id INTEGER,
         current_bait_id INTEGER,
         bait_start_time DATETIME,
-        current_title_id INTEGER,
         auto_fishing_enabled INTEGER DEFAULT 0,
         last_fishing_time DATETIME,
         last_steal_time DATETIME,
@@ -120,14 +117,6 @@ TABLES = [
     )
     """,
     """
-    CREATE TABLE IF NOT EXISTS titles (
-        title_id INTEGER PRIMARY KEY,
-        name TEXT NOT NULL UNIQUE,
-        description TEXT NOT NULL,
-        display_format TEXT DEFAULT '{name}'
-    )
-    """,
-    """
     CREATE TABLE IF NOT EXISTS fishing_zones (
         id INTEGER PRIMARY KEY,
         name TEXT NOT NULL,
@@ -158,7 +147,6 @@ TABLES = [
         level INTEGER NOT NULL UNIQUE,
         capacity INTEGER NOT NULL,
         cost_coins INTEGER NOT NULL,
-        cost_premium INTEGER DEFAULT 0,
         description TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
@@ -237,16 +225,6 @@ TABLES = [
     )
     """,
     """
-    CREATE TABLE IF NOT EXISTS user_titles (
-        user_id TEXT NOT NULL,
-        title_id INTEGER NOT NULL,
-        unlocked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (user_id, title_id),
-        FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
-        FOREIGN KEY (title_id) REFERENCES titles(title_id) ON DELETE CASCADE
-    )
-    """,
-    """
     CREATE TABLE IF NOT EXISTS user_buffs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT NOT NULL,
@@ -254,17 +232,6 @@ TABLES = [
         payload TEXT,
         started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         expires_at TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS user_achievement_progress (
-        user_id TEXT NOT NULL,
-        achievement_id INTEGER NOT NULL,
-        current_progress INTEGER DEFAULT 0,
-        completed_at DATETIME,
-        claimed_at DATETIME,
-        PRIMARY KEY (user_id, achievement_id),
         FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
     )
     """,
@@ -284,23 +251,6 @@ TABLES = [
     )
     """,
     """
-    CREATE TABLE IF NOT EXISTS fishing_records (
-        record_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id TEXT NOT NULL,
-        fish_id INTEGER NOT NULL,
-        weight INTEGER NOT NULL,
-        value INTEGER NOT NULL,
-        rod_instance_id INTEGER,
-        accessory_instance_id INTEGER,
-        bait_id INTEGER,
-        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-        location_id INTEGER,
-        is_king_size INTEGER DEFAULT 0,
-        FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
-        FOREIGN KEY (fish_id) REFERENCES fish(fish_id) ON DELETE RESTRICT
-    )
-    """,
-    """
     CREATE TABLE IF NOT EXISTS check_ins (
         user_id TEXT NOT NULL,
         check_in_date DATE NOT NULL,
@@ -314,7 +264,6 @@ TABLES = [
         name TEXT NOT NULL UNIQUE,
         description TEXT,
         cost_coins INTEGER DEFAULT 0,
-        cost_premium_currency INTEGER DEFAULT 0,
         is_limited_time INTEGER DEFAULT 0,
         open_until TEXT
     )
@@ -324,7 +273,7 @@ TABLES = [
         gacha_pool_item_id INTEGER PRIMARY KEY AUTOINCREMENT,
         gacha_pool_id INTEGER NOT NULL,
         item_type TEXT NOT NULL CHECK (
-            item_type IN ('rod', 'accessory', 'bait', 'fish', 'coins', 'premium_currency', 'item')
+            item_type IN ('rod', 'accessory', 'bait', 'fish', 'coins', 'item')
         ),
         item_id INTEGER NOT NULL,
         quantity INTEGER DEFAULT 1,
@@ -407,7 +356,7 @@ TABLES = [
     CREATE TABLE IF NOT EXISTS shop_item_costs (
         cost_id INTEGER PRIMARY KEY AUTOINCREMENT,
         item_id INTEGER NOT NULL,
-        cost_type TEXT NOT NULL CHECK (cost_type IN ('coins', 'premium', 'item', 'fish', 'rod', 'accessory')),
+        cost_type TEXT NOT NULL CHECK (cost_type IN ('coins', 'item', 'fish', 'rod', 'accessory')),
         cost_amount INTEGER NOT NULL CHECK (cost_amount > 0),
         cost_item_id INTEGER,
         cost_relation TEXT DEFAULT 'and' CHECK (cost_relation IN ('and', 'or')),
@@ -451,13 +400,10 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_user_accessories_user ON user_accessories(user_id)",
     "CREATE INDEX IF NOT EXISTS idx_user_accessories_locked ON user_accessories(user_id, is_locked)",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_user_accessories_display_code ON user_accessories(display_code)",
-    "CREATE INDEX IF NOT EXISTS idx_user_titles_user ON user_titles(user_id)",
     "CREATE INDEX IF NOT EXISTS idx_user_buffs_user_id ON user_buffs(user_id)",
     "CREATE INDEX IF NOT EXISTS idx_user_buffs_expires_at ON user_buffs(expires_at)",
     "CREATE INDEX IF NOT EXISTS idx_user_fish_stats_user ON user_fish_stats(user_id)",
     "CREATE INDEX IF NOT EXISTS idx_user_fish_stats_fish ON user_fish_stats(fish_id)",
-    "CREATE INDEX IF NOT EXISTS idx_fishing_records_user_time ON fishing_records(user_id, timestamp)",
-    "CREATE INDEX IF NOT EXISTS idx_fishing_records_fish_id ON fishing_records(fish_id)",
     "CREATE INDEX IF NOT EXISTS idx_aquarium_upgrades_level ON aquarium_upgrades(level)",
     "CREATE INDEX IF NOT EXISTS idx_gacha_pool_items_pool_type ON gacha_pool_items(gacha_pool_id, item_type)",
     "CREATE INDEX IF NOT EXISTS idx_gacha_records_user_time ON gacha_records(user_id, timestamp)",
@@ -517,7 +463,7 @@ def up(cursor: sqlite3.Cursor):
         )
     for level, capacity, cost, description in AQUARIUM_UPGRADES:
         cursor.execute(
-            "INSERT OR IGNORE INTO aquarium_upgrades (level, capacity, cost_coins, cost_premium, description) "
-            "VALUES (?, ?, ?, 0, ?)",
+            "INSERT OR IGNORE INTO aquarium_upgrades (level, capacity, cost_coins, description) "
+            "VALUES (?, ?, ?, ?)",
             (level, capacity, cost, description),
         )

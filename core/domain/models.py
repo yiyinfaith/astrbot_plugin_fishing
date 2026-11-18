@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # ---------------------------------
 # 游戏配置实体 (Configuration Entities)
@@ -88,29 +88,6 @@ class Item:
     effect_payload: Optional[str] = None
 
 @dataclass
-class Title:
-    """代表一种称号的模板信息"""
-    title_id: int
-    name: str
-    description: str
-    display_format: str = "{name}"
-
-@dataclass
-class Achievement:
-    """代表一个成就的模板信息"""
-    achievement_id: int
-    name: str
-    description: str
-    target_type: str
-    target_value: int
-    reward_type: str
-    target_fish_id: Optional[int] = None
-    reward_value: Optional[int] = None
-    reward_quantity: int = 1
-    is_repeatable: bool = False
-    icon_url: Optional[str] = None
-
-@dataclass
 class GachaPoolItem:
     """代表抽卡池中的一个奖品项"""
     gacha_pool_item_id: int
@@ -127,7 +104,6 @@ class GachaPool:
     name: str
     description: Optional[str] = None
     cost_coins: int = 0
-    cost_premium_currency: int = 0
     # 限时开放控制
     is_limited_time: int = 0  # 0/1 存储于数据库，前端按布尔使用
     open_until: Optional[str] = None  # 以文本存储的ISO时间（SQLite）
@@ -175,7 +151,6 @@ class User:
 
     # --- 有默认值的字段放后面 ---
     coins: int = 0
-    premium_currency: int = 0
     total_fishing_count: int = 0
     total_weight_caught: int = 0
     total_coins_earned: int = 0
@@ -188,7 +163,6 @@ class User:
     # 装备信息
     equipped_rod_instance_id: Optional[int] = None
     equipped_accessory_instance_id: Optional[int] = None
-    current_title_id: Optional[int] = None
     current_bait_id: Optional[int] = None
     bait_start_time: Optional[datetime] = None
 
@@ -233,24 +207,8 @@ class AquariumUpgrade:
     level: int
     capacity: int
     cost_coins: int
-    cost_premium: int = 0
     description: Optional[str] = None
     created_at: Optional[datetime] = None
-
-@dataclass
-class FishingRecord:
-    """一条详细的钓鱼记录"""
-    record_id: int
-    user_id: str
-    fish_id: int
-    weight: int
-    value: int
-    timestamp: datetime
-    rod_instance_id: Optional[int] = None
-    accessory_instance_id: Optional[int] = None
-    bait_id: Optional[int] = None
-    location_id: Optional[int] = None
-    is_king_size: bool = False
 
 @dataclass
 class GachaRecord:
@@ -391,7 +349,7 @@ class ShopItemCost:
     """商店商品成本实体（支持AND/OR关系）"""
     cost_id: int
     item_id: int
-    cost_type: str  # 'coins' | 'premium' | 'item' | 'fish' | 'rod' | 'accessory'
+    cost_type: str  # 'coins' | 'item' | 'fish' | 'rod' | 'accessory'
     cost_amount: int
     cost_item_id: Optional[int] = None
     cost_relation: str = "and"  # 'and' | 'or'
@@ -430,7 +388,7 @@ class ShopOfferCost:
     """商店消耗项（兼容旧接口）"""
     cost_id: int
     offer_id: int
-    cost_type: str  # 'coins' | 'premium' | 'item' | 'fish'
+    cost_type: str  # 'coins' | 'item' | 'fish'
     amount: int
     item_id: Optional[int] = None
 

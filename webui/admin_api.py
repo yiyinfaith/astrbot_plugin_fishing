@@ -32,8 +32,6 @@ ITEM_TYPE_LABELS = {
     "accessory": "饰品",
     "item": "道具",
     "coins": "金币",
-    "premium": "高级货币",
-    "titles": "称号",
 }
 
 # 物品模板的字段定义：后端用它校验和转换，前端用它渲染表格与表单。
@@ -148,7 +146,6 @@ TEMPLATE_KINDS: Dict[str, Dict[str, Any]] = {
 USER_EDITABLE_FIELDS = {
     "nickname": "str",
     "coins": "int",
-    "premium_currency": "int",
     "total_fishing_count": "int",
     "total_weight_caught": "int",
     "total_coins_earned": "int",
@@ -165,7 +162,7 @@ TEMPLATE_REFERENCES = {
     "fish": [
         ("user_fish_inventory", "fish_id", "", "玩家鱼塘"),
         ("user_aquarium", "fish_id", "", "玩家水族箱"),
-        ("fishing_records", "fish_id", "", "钓鱼记录"),
+        ("user_fish_stats", "fish_id", "", "鱼类图鉴"),
         ("market", "item_id", "AND item_type = 'fish'", "市场挂单"),
         ("gacha_pool_items", "item_id", "AND item_type = 'fish'", "卡池"),
         ("shop_item_costs", "cost_item_id", "AND cost_type = 'fish'", "商店消耗"),
@@ -343,7 +340,7 @@ class FishingAdminAPI:
         return [
             ("overview", "GET", self.overview, "概览"),
             ("meta", "GET", self.meta, "管理页元数据"),
-            ("catalog", "GET", self.catalog, "物品与称号目录"),
+            ("catalog", "GET", self.catalog, "物品目录"),
             # 用户
             ("users", "GET", self.users_list, "用户列表"),
             ("users/detail", "GET", self.user_detail, "用户详情"),
@@ -356,20 +353,15 @@ class FishingAdminAPI:
             ("users/inventory/remove", "POST", self.user_inventory_remove, "移除库存"),
             ("users/inventory/rod", "POST", self.user_rod_update, "编辑鱼竿实例"),
             ("users/inventory/accessory", "POST", self.user_accessory_update, "编辑饰品实例"),
-            ("users/titles/grant", "POST", self.user_title_grant, "授予称号"),
-            ("users/titles/revoke", "POST", self.user_title_revoke, "移除称号"),
             # 全服操作
             ("broadcast/currency", "POST", self.broadcast_currency, "全体发放或扣除货币"),
             ("broadcast/item", "POST", self.broadcast_item, "全体发放物品"),
             ("ops/sync", "POST", self.ops_sync, "同步初始设定"),
-            # 物品模板与称号
+            # 物品模板
             ("templates", "GET", self.templates_list, "物品模板列表"),
             ("templates/save", "POST", self.template_save, "保存物品模板"),
             ("templates/delete", "POST", self.template_delete, "删除物品模板"),
             ("templates/import", "POST", self.template_import, "导入物品模板"),
-            ("titles", "GET", self.titles_list, "称号列表"),
-            ("titles/save", "POST", self.title_save, "保存称号"),
-            ("titles/delete", "POST", self.title_delete, "删除称号"),
             # 抽卡
             ("gacha", "GET", self.gacha_list, "卡池列表"),
             ("gacha/save", "POST", self.gacha_save, "保存卡池"),
@@ -451,7 +443,6 @@ class FishingAdminAPI:
             "bait": repo.get_bait_by_id,
             "accessory": repo.get_accessory_by_id,
             "item": repo.get_item_by_id,
-            "titles": repo.get_title_by_id,
         }
         getter = getters.get(item_type)
         if not getter:
@@ -464,8 +455,6 @@ class FishingAdminAPI:
     def _template_name(self, item_type: str, item_id: Any) -> tuple:
         if item_type == "coins":
             return "金币", None
-        if item_type == "premium":
-            return "高级货币", None
         template = self._template(item_type, item_id)
         if not template:
             return f"{ITEM_TYPE_LABELS.get(item_type, item_type)}#{item_id}（已删除）", None
@@ -493,13 +482,11 @@ class FishingAdminAPI:
         market = p.market_service.get_all_market_listings_for_admin(page=1, per_page=1)
         user_ids = self._real_user_ids()
         coins_total = 0
-        premium_total = 0
         auto_count = 0
         for uid in user_ids:
             user = p.user_repo.get_by_id(uid)
             if user:
                 coins_total += user.coins or 0
-                premium_total += user.premium_currency or 0
                 auto_count += 1 if user.auto_fishing_enabled else 0
         zones = p.fishing_zone_service.get_all_zones()
         return {
@@ -507,7 +494,6 @@ class FishingAdminAPI:
             "users": len(user_ids),
             "auto_fishing_users": auto_count,
             "coins_total": coins_total,
-            "premium_total": premium_total,
             "market": (market.get("stats") if market.get("success") else {}) or {},
             "counts": {
                 "fish": len(p.item_template_service.get_all_fish()),
@@ -515,7 +501,6 @@ class FishingAdminAPI:
                 "baits": len(p.item_template_service.get_all_baits()),
                 "accessories": len(p.item_template_service.get_all_accessories()),
                 "items": len(p.item_template_service.get_all_items()),
-                "titles": len(p.item_template_repo.get_all_titles()),
                 "zones": len(zones),
                 "active_zones": len([z for z in zones if z.get("is_active")]),
                 "shops": len(p.shop_repo.get_all_shops()),
@@ -544,10 +529,6 @@ class FishingAdminAPI:
             "bait": brief(svc.get_all_baits(), "bait_id"),
             "accessory": brief(svc.get_all_accessories(), "accessory_id"),
             "item": brief(svc.get_all_items(), "item_id"),
-            "titles": [
-                {"id": t.title_id, "name": t.name, "rarity": None}
-                for t in self.p.item_template_repo.get_all_titles()
-            ],
             "zones": [{"id": z["id"], "name": z["name"]} for z in self.p.fishing_zone_service.get_all_zones()],
         }
 
@@ -573,8 +554,6 @@ class FishingAdminAPI:
             "user": result["user"],
             "equipped_rod": result["equipped_rod"],
             "equipped_accessory": result["equipped_accessory"],
-            "current_title": result["current_title"],
-            "titles": result.get("titles", []),
         }
 
     def _user_fields(self, data: dict) -> dict:
@@ -614,15 +593,13 @@ class FishingAdminAPI:
 
     def user_currency(self, query, body):
         user = self._user_or_error(body.get("user_id"))
-        currency = body.get("currency")
-        if currency not in ("coins", "premium_currency"):
+        if body.get("currency", "coins") != "coins":
             raise ApiError("货币类型无效")
         mode = body.get("mode")
         if mode not in ("set", "add", "subtract"):
             raise ApiError("调整方式无效")
         amount = _int(body.get("amount"), "数量", minimum=0)
-        label = "金币" if currency == "coins" else "高级货币"
-        before = getattr(user, currency) or 0
+        before = user.coins
         if mode == "set":
             after = amount
         elif mode == "add":
@@ -633,10 +610,10 @@ class FishingAdminAPI:
             if amount <= 0:
                 raise ApiError("扣除数量必须大于 0")
             after = max(0, before - amount)
-        setattr(user, currency, after)
+        user.coins = after
         self.p.user_repo.update(user)
-        logger.info(f"[钓鱼管理] {user.user_id} 的{label}：{before} -> {after}")
-        return {"message": f"{user.nickname or user.user_id} 的{label}已从 {before:,} 调整为 {after:,}", "value": after}
+        logger.info(f"[钓鱼管理] {user.user_id} 的金币：{before} -> {after}")
+        return {"message": f"{user.nickname or user.user_id} 的金币已从 {before:,} 调整为 {after:,}", "value": after}
 
     def user_inventory(self, query, body):
         user = self._user_or_error(query.get("user_id"))
@@ -675,48 +652,36 @@ class FishingAdminAPI:
         updates = {"refine_level": _int(body.get("refine_level"), "精炼等级", minimum=1, maximum=10)}
         return _check(self.p.user_service.update_user_accessory_instance_for_admin(user.user_id, instance_id, updates))
 
-    def user_title_grant(self, query, body):
-        user = self._user_or_error(body.get("user_id"))
-        name = _text(body.get("title_name"), "称号名称", required=True, max_len=64)
-        return _check(self.p.user_service.grant_title_to_user_by_name(user.user_id, name))
-
-    def user_title_revoke(self, query, body):
-        user = self._user_or_error(body.get("user_id"))
-        name = _text(body.get("title_name"), "称号名称", required=True, max_len=64)
-        return _check(self.p.user_service.revoke_title_from_user_by_name(user.user_id, name))
-
     # ------------------------------------------------------------------
     # 全服操作
     # ------------------------------------------------------------------
 
     def broadcast_currency(self, query, body):
-        currency = body.get("currency")
-        if currency not in ("coins", "premium_currency"):
+        if body.get("currency", "coins") != "coins":
             raise ApiError("货币类型无效")
         mode = body.get("mode")
         if mode not in ("add", "subtract"):
             raise ApiError("操作类型无效")
         amount = _int(body.get("amount"), "数量", minimum=1)
-        label = "金币" if currency == "coins" else "高级货币"
         affected = 0
         total = 0
         for uid in self._real_user_ids():
             user = self.p.user_repo.get_by_id(uid)
             if not user:
                 continue
-            current = getattr(user, currency) or 0
+            current = user.coins
             change = amount if mode == "add" else min(current, amount)
             if change <= 0:
                 continue
-            setattr(user, currency, current + change if mode == "add" else current - change)
+            user.coins = current + change if mode == "add" else current - change
             self.p.user_repo.update(user)
             affected += 1
             total += change
-        logger.info(f"[钓鱼管理] 全体{'发放' if mode == 'add' else '扣除'}{label} {amount}，影响 {affected} 人")
+        logger.info(f"[钓鱼管理] 全体{'发放' if mode == 'add' else '扣除'}金币 {amount}，影响 {affected} 人")
         if mode == "add":
-            message = f"已向 {affected} 位玩家每人发放 {amount:,} {label}"
+            message = f"已向 {affected} 位玩家每人发放 {amount:,} 金币"
         else:
-            message = f"已从 {affected} 位玩家共扣除 {total:,} {label}（每人至多 {amount:,}）"
+            message = f"已从 {affected} 位玩家共扣除 {total:,} 金币（每人至多 {amount:,}）"
         return {"message": message, "affected": affected, "total": total}
 
     def broadcast_item(self, query, body):
@@ -838,7 +803,7 @@ class FishingAdminAPI:
         try:
             self._template_service_calls(kind)[3](template_id)
         except sqlite3.IntegrityError:
-            raise ApiError(f"该{spec['label']}仍被钓鱼记录等历史数据引用，无法删除")
+            raise ApiError(f"该{spec['label']}仍被游戏数据引用，无法删除")
         return {"message": f"{spec['label']} #{template_id} 已删除"}
 
     def template_import(self, query, body):
@@ -872,37 +837,6 @@ class FishingAdminAPI:
         return {"message": message, "imported": ok, "failed": failed, "errors": errors}
 
     # ------------------------------------------------------------------
-    # 称号
-    # ------------------------------------------------------------------
-
-    def titles_list(self, query, body):
-        return {"rows": _check(self.p.user_service.get_all_titles_for_admin())["titles"]}
-
-    def title_save(self, query, body):
-        name = _text(body.get("name"), "称号名称", required=True, max_len=64)
-        description = _text(body.get("description"), "描述", max_len=200) or f"自定义称号：{name}"
-        display_format = _text(body.get("display_format"), "显示格式", max_len=100) or "{name}"
-        title_id = _int(body.get("title_id"), "称号 ID", optional=True, minimum=1)
-        if not title_id:
-            return _check(self.p.user_service.create_custom_title(name, description, display_format))
-        svc = self.p.item_template_service
-        if not svc.get_title_by_id(title_id):
-            raise ApiError(f"称号 #{title_id} 不存在", 404)
-        same_name = svc.get_title_by_name(name)
-        if same_name and same_name.title_id != title_id:
-            raise ApiError(f"称号名称 {name} 已被其他称号使用")
-        svc.update_title_template(title_id, {"name": name, "description": description, "display_format": display_format})
-        return {"message": f"称号 {name} 已更新"}
-
-    def title_delete(self, query, body):
-        title_id = _int(body.get("title_id"), "称号 ID", minimum=1)
-        try:
-            self.p.item_template_service.delete_title_template(title_id)
-        except sqlite3.IntegrityError:
-            raise ApiError("该称号仍被玩家持有，无法删除")
-        return {"message": f"称号 #{title_id} 已删除"}
-
-    # ------------------------------------------------------------------
     # 抽卡
     # ------------------------------------------------------------------
 
@@ -912,8 +846,7 @@ class FishingAdminAPI:
 
     def gacha_save(self, query, body):
         name = _text(body.get("name"), "卡池名称", required=True, max_len=64)
-        currency = body.get("currency_type", "coins")
-        if currency not in ("coins", "premium"):
+        if body.get("currency_type", "coins") != "coins":
             raise ApiError("消耗货币无效")
         amount = _int(body.get("cost_amount"), "消耗数量", default=0, minimum=0)
         limited = _bool(body.get("is_limited_time"))
@@ -923,8 +856,7 @@ class FishingAdminAPI:
         payload = {
             "name": name,
             "description": _text(body.get("description"), "描述", max_len=500),
-            "cost_coins": amount if currency == "coins" else 0,
-            "cost_premium_currency": amount if currency == "premium" else 0,
+            "cost_coins": amount,
             "is_limited_time": limited,
             "open_until": open_until,
         }
@@ -966,7 +898,7 @@ class FishingAdminAPI:
 
     def gacha_item_save(self, query, body):
         item_type = body.get("item_type")
-        if item_type not in ("rod", "accessory", "bait", "item", "coins", "titles"):
+        if item_type not in ("rod", "accessory", "bait", "item", "coins"):
             raise ApiError("物品类型无效")
         item_id = 0 if item_type == "coins" else _int(body.get("item_id"), "物品", minimum=1)
         data = {
@@ -1161,7 +1093,7 @@ class FishingAdminAPI:
         costs = []
         for index, row in enumerate(rows, start=1):
             cost_type = row.get("cost_type")
-            if cost_type not in ("coins", "premium", "fish", "item", "rod", "accessory"):
+            if cost_type not in ("coins", "fish", "item", "rod", "accessory"):
                 raise ApiError(f"第 {index} 条消耗的类型无效")
             relation = row.get("cost_relation", "and")
             if relation not in ("and", "or"):

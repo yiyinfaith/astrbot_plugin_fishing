@@ -221,30 +221,6 @@ def format_rarity_display(rarity: int) -> str:
     else:
         return '⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐+'
 
-def format_accessory_or_rod(accessory_or_rod: dict) -> str:
-    """格式化配件信息"""
-    # 显示短码而非数字ID
-    display_code = accessory_or_rod.get('display_code', f"ID{accessory_or_rod['instance_id']}")
-    message =  f" - ID: {display_code}\n"
-    message += f" - {accessory_or_rod['name']} (稀有度: {format_rarity_display(accessory_or_rod['rarity'])})\n"
-    if accessory_or_rod.get("is_equipped", False):
-        message += f"   - {'✅ 已装备'}\n"
-    # 显示锁定状态：锁定或未锁定
-    if accessory_or_rod.get("is_locked", False):
-        message += f"   - {'🔒 已锁定'}\n"
-    else:
-        message += f"   - {'🔓 未锁定'}\n"
-    if accessory_or_rod.get("bonus_fish_quality_modifier", 1.0) != 1.0 and accessory_or_rod.get("bonus_fish_quality_modifier", 1) != 1 and accessory_or_rod.get("bonus_fish_quality_modifier", 1) > 0:
-        message += f"   - ✨鱼类品质加成: {to_percentage(accessory_or_rod['bonus_fish_quality_modifier'])}\n"
-    if accessory_or_rod.get("bonus_fish_quantity_modifier", 1.0) != 1.0 and accessory_or_rod.get("bonus_fish_quantity_modifier", 1) != 1 and accessory_or_rod.get("bonus_fish_quantity_modifier", 1) > 0:
-        message += f"   - 📊鱼类数量加成: {to_percentage(accessory_or_rod['bonus_fish_quantity_modifier'])}\n"
-    if accessory_or_rod.get("bonus_rare_fish_chance", 1.0) != 1.0 and accessory_or_rod.get("bonus_rare_fish_chance", 1) != 1 and accessory_or_rod.get("bonus_rare_fish_chance", 1) > 0:
-        message += f"   - 🎣钓鱼几率加成: {to_percentage(accessory_or_rod['bonus_rare_fish_chance'])}\n"
-    if accessory_or_rod.get("description"):
-        message += f"   - 📋描述: {accessory_or_rod['description']}\n"
-    message += "\n"
-    return message
-
 from datetime import datetime, timezone, timedelta  # noqa: E402
 from typing import Union, Optional, Tuple  # noqa: E402
 from astrbot.core.message.components import At  # noqa: E402

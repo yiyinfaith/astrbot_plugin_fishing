@@ -8,7 +8,7 @@ from .styles import (
     HEADER_HEIGHT, USER_CARD_HEIGHT, USER_CARD_MARGIN,
     COLOR_BACKGROUND, COLOR_HEADER_BG, COLOR_TEXT_WHITE as COLOR_HEADER_TEXT,
     COLOR_CARD_BG, COLOR_CARD_BORDER, COLOR_TEXT_DARK,
-    COLOR_ACCENT, COLOR_TEXT_GOLD, COLOR_TEXT_SILVER, COLOR_TEXT_BRONZE,
+    COLOR_TEXT_GOLD, COLOR_TEXT_SILVER, COLOR_TEXT_BRONZE,
     COLOR_FISH_COUNT, COLOR_COINS, load_font
 )
 
@@ -76,7 +76,7 @@ def draw_fishing_ranking(user_data: List[Dict], output_path: str, ranking_type: 
     绘制钓鱼排行榜图片
 
     参数:
-    user_data: 用户数据列表，每个用户是一个字典，包含昵称、称号、金币、钓鱼数量、总重量、鱼竿、饰品等信息
+    user_data: 用户数据列表，每个用户是一个字典，包含昵称、金币、钓鱼数量、总重量、鱼竿、饰品等信息
     output_path: 输出图片路径
     ranking_type: 排行榜类型 ('coins', 'max_coins', 'fish_count', 'total_weight_caught')
     """
@@ -140,7 +140,6 @@ def draw_fishing_ranking(user_data: List[Dict], output_path: str, ranking_type: 
     for idx, user in enumerate(top_users):
         # 获取用户数据
         nickname = user.get("nickname", "未知用户")
-        title = user.get("title", "无称号")
         coins = user.get("coins", 0)
         max_coins = user.get("max_coins", 0)
         fish_count = user.get("fish_count", 0)
@@ -174,7 +173,7 @@ def draw_fishing_ranking(user_data: List[Dict], output_path: str, ranking_type: 
             rank_y = card_y1 + (USER_CARD_HEIGHT - get_text_metrics(rank_text, font_rank, draw)[1][1]) // 2
             draw.text((rank_x, rank_y), rank_text, font=font_rank, fill=rank_color)
 
-        # 绘制用户名和称号
+        # 绘制用户名
         name_x = PADDING + 70
         name_y = card_y1 + 15
         
@@ -182,11 +181,6 @@ def draw_fishing_ranking(user_data: List[Dict], output_path: str, ranking_type: 
             nickname = nickname[:10] + "..."
         draw.text((name_x, name_y), nickname, font=font_name, fill=COLOR_TEXT_DARK)
 
-        _, (name_width, _) = get_text_metrics(nickname, font_name, draw)
-        title_x = name_x + name_width + 10
-        title_y = name_y + 2
-        title_display = title if len(title) <= 8 else title[:6] + ".."
-        draw.text((title_x, title_y), f"【{title_display}】", font=font_small, fill=COLOR_ACCENT)
 
         # --- 修改：重新布局底部信息行（根据排行榜类型显示）---
         bottom_line_y = name_y + get_text_metrics(nickname, font_name, draw)[1][1] + 10

@@ -1,9 +1,8 @@
-from astrbot.api.event import filter, AstrMessageEvent
+from astrbot.api.event import AstrMessageEvent
 from astrbot.api import logger
 from ..core.utils import get_now
-from ..utils import safe_datetime_handler, to_percentage, safe_get_file_path
+from ..utils import safe_get_file_path
 from ..draw.pokedex import draw_pokedex
-from astrbot.api.message_components import Image as AstrImage
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -60,7 +59,6 @@ class FishingHandlers:
         self.market_service = plugin.market_service
         self.shop_service = plugin.shop_service
         self.item_template_repo = plugin.item_template_repo
-        self.achievement_service = plugin.achievement_service
         self.aquarium_service = plugin.aquarium_service
 
     def _get_fishing_cost(self, user):
