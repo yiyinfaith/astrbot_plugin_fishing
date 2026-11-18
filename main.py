@@ -29,6 +29,7 @@ from .core.services.effect_manager import EffectManager
 from .core.services.fishing_zone_service import FishingZoneService
 from .core.services.fish_weight_service import FishWeightService
 
+from .core.database.connection_manager import DatabaseConnectionManager
 from .core.database.migration import run_migrations
 from .core.game_settings import build_fishing_rules, build_pond_upgrades, build_refine, build_signin
 
@@ -151,14 +152,15 @@ class FishingPlugin(Star):
         run_migrations(db_path, migrations_path)
 
         # --- 2. 组合根：实例化所有仓储层 ---
-        self.user_repo = SqliteUserRepository(db_path)
-        self.item_template_repo = SqliteItemTemplateRepository(db_path)
-        self.inventory_repo = SqliteInventoryRepository(db_path)
-        self.gacha_repo = SqliteGachaRepository(db_path)
-        self.market_repo = SqliteMarketRepository(db_path)
-        self.shop_repo = SqliteShopRepository(db_path)
-        self.log_repo = SqliteLogRepository(db_path)
-        self.buff_repo = SqliteUserBuffRepository(db_path)
+        self.database = DatabaseConnectionManager(db_path)
+        self.user_repo = SqliteUserRepository(db_path, self.database)
+        self.item_template_repo = SqliteItemTemplateRepository(db_path, self.database)
+        self.inventory_repo = SqliteInventoryRepository(db_path, self.database)
+        self.gacha_repo = SqliteGachaRepository(db_path, self.database)
+        self.market_repo = SqliteMarketRepository(db_path, self.database)
+        self.shop_repo = SqliteShopRepository(db_path, self.database)
+        self.log_repo = SqliteLogRepository(db_path, self.database)
+        self.buff_repo = SqliteUserBuffRepository(db_path, self.database)
 
         # --- 3. 组合根：实例化所有服务层，并注入依赖 ---
         # 3.1 核心服务必须在效果管理器之前实例化，以解决依赖问题
@@ -224,24 +226,15 @@ class FishingPlugin(Star):
 
         self.item_template_service = ItemTemplateService(self.item_template_repo, self.gacha_repo)
 
-        # --- 4. 启动后台任务 ---
-        self.fishing_service.start_auto_fishing_task()
-
-        # --- 5. 初始化核心游戏数据 ---
+        # --- 4. 初始化核心游戏数据 ---
         data_setup_service = DataSetupService(
             self.item_template_repo, self.gacha_repo, self.shop_repo, self.user_repo,
             inventory_repo=self.inventory_repo,
         )
-        data_setup_service.setup_initial_data()
-        # 确保初始道具存在（在已有数据库上也可幂等执行）
-        try:
-            data_setup_service.create_initial_items()
-        except Exception:
-            pass
+        with self.database.transaction():
+            data_setup_service.setup_initial_data()
 
-        # 商店完全由后台管控，不再自动种子化
-
-        # --- 6. 保留数据服务实例，供面板「同步初始设定」使用 ---
+        # --- 5. 保留数据服务实例，供面板「同步初始设定」使用 ---
         self.data_setup_service = data_setup_service
 
         # --- AstrBot 面板内嵌管理页的后端接口 ---
@@ -252,6 +245,7 @@ class FishingPlugin(Star):
             api for api in context.registered_web_apis if not api[0].startswith(route_prefix)
         ]
         self.admin_api.register(self.context, PLUGIN_NAME)
+        self.fishing_service.start_auto_fishing_task()
 
     async def _guard(self, event: AstrMessageEvent, results):
         """执行一条指令；出错时记录完整日志，并给玩家一个明确的回复，而不是没有反应。"""
@@ -519,7 +513,7 @@ class FishingPlugin(Star):
 
     @filter.command("十连")
     async def ten_gacha(self, event: AstrMessageEvent):
-        """进行十次连续抽卡，有保底机制"""
+        """进行十次连续抽卡"""
         async for r in self._guard(event, gacha_handlers.ten_gacha(self, event)):
             yield r
 
@@ -560,6 +554,5 @@ class FishingPlugin(Star):
         logger.info("钓鱼插件正在终止...")
         self.fishing_service.stop_auto_fishing_task()
         
-        for repo in (self.user_repo, self.inventory_repo):
-            repo.close_connection()
+        self.database.close_connection()
         logger.info("钓鱼插件已成功终止。")

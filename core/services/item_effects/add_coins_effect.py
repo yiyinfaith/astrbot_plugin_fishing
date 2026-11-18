@@ -1,5 +1,4 @@
 from typing import Dict, Any
-import json
 import random
 
 from .abstract_effect import AbstractItemEffect
@@ -18,14 +17,19 @@ class AddCoinsEffect(AbstractItemEffect):
         total_amount = 0
         if min_amount is not None and max_amount is not None:
             # 随机金额
-            if min_amount >= max_amount:
+            if (
+                type(min_amount) is not int or type(max_amount) is not int
+                or not 0 < min_amount <= max_amount
+            ):
                 return {"success": False, "message": "无效的随机金额范围"}
-            for _ in range(quantity):
-                total_amount += random.randint(min_amount, max_amount)
+            if min_amount == max_amount:
+                total_amount = min_amount * quantity
+            else:
+                total_amount = sum(random.randint(min_amount, max_amount) for _ in range(quantity))
         else:
             # 固定金额
             amount = payload.get("amount", 0)
-            if not isinstance(amount, int) or amount <= 0:
+            if type(amount) is not int or amount <= 0:
                 return {"success": False, "message": "无效的金币道具"}
             total_amount = amount * quantity
 

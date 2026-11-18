@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, ContextManager
 from datetime import date, datetime
 
 # 从领域模型导入所有需要的实体
@@ -171,6 +171,11 @@ class AbstractItemTemplateRepository(ABC):
     def delete_accessory_template(self, accessory_id: int) -> None: pass
 class AbstractInventoryRepository(ABC):
     """用户库存仓储接口"""
+
+    @abstractmethod
+    def transaction(self) -> ContextManager:
+        """Group related mutations across game repositories."""
+
     # 获取用户的鱼类库存
     @abstractmethod
     def get_fish_inventory(self, user_id: str) -> List[UserFishInventoryItem]: pass
@@ -301,7 +306,7 @@ class AbstractInventoryRepository(ABC):
     def update_fish_quantity(self, user_id: str, fish_id: int, delta: int, quality_level: int = 0) -> None: pass
     # 获取钓鱼区域信息
     @abstractmethod
-    def get_zone_by_id(self, zone_id: int) -> FishingZone: pass
+    def get_zone_by_id(self, zone_id: int) -> Optional[FishingZone]: pass
     # 设置区域需要的通行证
     @abstractmethod
     def set_zone_pass_requirement(self, zone_id: int, item_id: Optional[int]) -> None: pass
@@ -394,10 +399,6 @@ class AbstractGachaRepository(ABC):
 
     @abstractmethod
     def claim_daily_supply(self, user_id: str, pool_id: int, claim_date: date) -> bool:
-        pass
-
-    @abstractmethod
-    def release_daily_supply(self, user_id: str, pool_id: int, claim_date: date) -> None:
         pass
 
 

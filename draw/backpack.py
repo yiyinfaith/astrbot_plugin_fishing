@@ -291,7 +291,7 @@ def draw_backpack_image(user_data: Dict[str, Any], avatar_image: Image.Image | N
     items_count = user_data.get('total_items', len(user_data.get('items', [])))
     
     stats_text = f"鱼竿: {rods_count} | 饰品: {accessories_count} | 鱼饵: {baits_count} | 道具: {items_count}"
-    value_text = f"装备总价值: {user_data['total_value']:,} 金币"
+    value_text = f"可回收装备价值: {user_data['total_value']:,} 金币"
     stats_w, stats_h = get_text_size(stats_text, small_font)
     value_w, value_h = get_text_size(value_text, small_font)
     gap = 24

@@ -5,6 +5,7 @@ import math
 
 from astrbot.api import logger
 # 导入仓储接口和领域模型
+from ..database.connection_manager import atomic_game_operation
 from ..repositories.abstract_repository import (
     AbstractMarketRepository,
     AbstractInventoryRepository,
@@ -13,6 +14,9 @@ from ..repositories.abstract_repository import (
     AbstractItemTemplateRepository,
 )
 from ..domain.models import MarketListing
+from ..utils import ensure_aware, get_now
+
+LISTING_LIFETIME = timedelta(days=5)
 
 
 class MarketService:
@@ -61,20 +65,20 @@ class MarketService:
         """
         try:
             listings, _ = self.market_repo.get_all_listings()
-            now = datetime.now()
-            five_days_ago = now - timedelta(days=5)
-
+            now = get_now()
             for listing in listings:
-                # 挂单超过5天自动下架
-                if listing.listed_at < five_days_ago:
+                if self._listing_expired(listing, now):
                     try:
-                        self._return_listing_to_seller(listing)
-                        self.market_repo.remove_listing(listing.market_id)
-                        logger.info(f"过期挂单已自动下架并返还: Market ID {listing.market_id} -> User {listing.user_id}")
+                        self.remove_market_item_by_admin(listing.market_id)
                     except Exception as e:
                         logger.error(f"自动下架 Market ID {listing.market_id} 失败: {e}")
         except Exception as e:
             logger.error(f"市场清理任务失败: {e}")
+
+    @staticmethod
+    def _listing_expired(listing: MarketListing, now: datetime) -> bool:
+        deadline = ensure_aware(listing.expires_at) or ensure_aware(listing.listed_at) + LISTING_LIFETIME
+        return now >= deadline
 
     def get_market_listings(self) -> Dict[str, Any]:
         """
@@ -200,6 +204,7 @@ class MarketService:
         elif item_type == "fish":
             self.inventory_repo.update_fish_quantity(user_id, item_instance_id, -quantity, quality_level)
 
+    @atomic_game_operation
     def put_item_on_sale(self, user_id: str, item_type: str, item_instance_id: int, price: int, is_anonymous: bool = False, quantity: int = 1, quality_level: int = 0) -> Dict[str, Any]:
         """
         处理上架物品到市场的逻辑。
@@ -266,7 +271,7 @@ class MarketService:
             item_name=validation_result["item_name"],
             item_description=validation_result["item_description"],
             price=price,
-            listed_at=datetime.now(),
+            listed_at=get_now(),
             expires_at=validation_result["expires_at"],
             refine_level=validation_result["item_refine_level"],
             quality_level=quality_level if item_type == "fish" else 0,
@@ -345,6 +350,7 @@ class MarketService:
             logger.error(f"查找道具市场ID失败: {e}")
             return None
 
+    @atomic_game_operation
     def buy_market_item(self, buyer_id: str, market_id: int) -> Dict[str, Any]:
         """
         处理从市场购买物品的逻辑。
@@ -356,6 +362,9 @@ class MarketService:
         listing = self.market_repo.get_listing_by_id(market_id)
         if not listing:
             return {"success": False, "message": "该商品不存在或已被购买"}
+        if self._listing_expired(listing, get_now()):
+            self.remove_market_item_by_admin(market_id)
+            return {"success": False, "message": "该挂单已过期，物品已返还"}
 
         # 检查是否购买自己的商品
         if buyer_id == listing.user_id:
@@ -369,62 +378,52 @@ class MarketService:
 
         if not buyer.can_afford(total_price):
             return {"success": False, "message": f"金币不足，需要 {total_price} 金币"}
+        if listing.item_type == "fish":
+            count = self.inventory_repo.get_aquarium_total_count(buyer_id)
+            if count + listing.quantity > buyer.aquarium_capacity:
+                return {"success": False, "message": "水族箱空间不足，无法接收这些鱼"}
 
         # 使用事务处理确保数据一致性
-        try:
-            # 1. 从买家扣款
-            buyer.coins -= total_price
-            self.user_repo.update(buyer)
+        # 1. 从买家扣款
+        buyer.coins -= total_price
+        self.user_repo.update(buyer)
 
-            # 2. 给卖家打款
-            seller.coins += total_price
-            self.user_repo.update(seller)
+        # 2. 给卖家打款
+        seller.coins += total_price
+        self.user_repo.update(seller)
 
-            # 3. 将物品发给买家
-            if listing.item_type == "rod":
-                # 直接转移鱼竿实例所有权给买家（保留所有属性包括耐久度）
-                self.inventory_repo.transfer_rod_instance_ownership(listing.item_instance_id, buyer_id)
-            elif listing.item_type == "accessory":
-                # 直接转移饰品实例所有权给买家（保留所有属性）
-                self.inventory_repo.transfer_accessory_instance_ownership(listing.item_instance_id, buyer_id)
-            elif listing.item_type == "item":
-                # 给买家添加道具
-                self.inventory_repo.update_item_quantity(buyer_id, listing.item_id, listing.quantity)
-            elif listing.item_type == "fish":
-                # 给买家添加鱼类到水族箱（默认放入水族箱）
-                # 使用市场商品中设置的品质等级
-                quality_level = listing.quality_level
-                self.inventory_repo.add_fish_to_aquarium(buyer_id, listing.item_id, listing.quantity, quality_level)
+        # 3. 将物品发给买家
+        if listing.item_type == "rod":
+            # 直接转移鱼竿实例所有权给买家（保留所有属性包括耐久度）
+            self.inventory_repo.transfer_rod_instance_ownership(listing.item_instance_id, buyer_id)
+        elif listing.item_type == "accessory":
+            # 直接转移饰品实例所有权给买家（保留所有属性）
+            self.inventory_repo.transfer_accessory_instance_ownership(listing.item_instance_id, buyer_id)
+        elif listing.item_type == "item":
+            # 给买家添加道具
+            self.inventory_repo.update_item_quantity(buyer_id, listing.item_id, listing.quantity)
+        elif listing.item_type == "fish":
+            # 给买家添加鱼类到水族箱（默认放入水族箱）
+            # 使用市场商品中设置的品质等级
+            quality_level = listing.quality_level
+            self.inventory_repo.add_fish_to_aquarium(buyer_id, listing.item_id, listing.quantity, quality_level)
 
-            # 4. 从市场移除该商品
-            self.market_repo.remove_listing(market_id)
+        # 4. 从市场移除该商品
+        self.market_repo.remove_listing(market_id)
 
-            quantity_text = f" x{listing.quantity}" if listing.quantity > 1 else ""
-            
-            # 为鱼类添加品质显示
-            quality_text = ""
-            if listing.item_type == "fish" and listing.quality_level == 1:
-                quality_text = " ✨高品质"
-            
-            message = f"✅ 成功购买【{listing.item_name}{quality_text}】{quantity_text}，花费 {total_price} 金币！"
-            # 如果是鱼类，提示用户去水族箱查收
-            if listing.item_type == "fish":
-                message += "\n🐠 请前往水族箱查收您的鱼类！"
-            
-            return {"success": True, "message": message}
+        quantity_text = f" x{listing.quantity}" if listing.quantity > 1 else ""
 
-        except Exception as e:
-            # 回滚交易
-            try:
-                buyer.coins += total_price
-                seller.coins -= total_price
-                self.user_repo.update(buyer)
-                self.user_repo.update(seller)
-            except Exception as rollback_error:
-                logger.error(f"回滚交易失败: {rollback_error}")
-            
-            logger.error(f"市场购买失败: {e}")
-            return {"success": False, "message": f"购买失败，系统错误: {str(e)}"}
+        # 为鱼类添加品质显示
+        quality_text = ""
+        if listing.item_type == "fish" and listing.quality_level == 1:
+            quality_text = " ✨高品质"
+
+        message = f"✅ 成功购买【{listing.item_name}{quality_text}】{quantity_text}，花费 {total_price} 金币！"
+        # 如果是鱼类，提示用户去水族箱查收
+        if listing.item_type == "fish":
+            message += "\n🐠 请前往水族箱查收您的鱼类！"
+
+        return {"success": True, "message": message}
 
     def _return_listing_to_seller(self, listing):
         """将挂单物品返还给卖家"""
@@ -437,10 +436,16 @@ class MarketService:
         elif listing.item_type == "item":
             self.inventory_repo.update_item_quantity(listing.user_id, listing.item_id, listing.quantity)
         elif listing.item_type == "fish":
-            self.inventory_repo.add_fish_to_aquarium(listing.user_id, listing.item_id, listing.quantity, listing.quality_level)
+            seller = self.user_repo.get_by_id(listing.user_id)
+            count = self.inventory_repo.get_aquarium_total_count(listing.user_id)
+            if count + listing.quantity <= seller.aquarium_capacity:
+                self.inventory_repo.add_fish_to_aquarium(listing.user_id, listing.item_id, listing.quantity, listing.quality_level)
+            else:
+                self.inventory_repo.add_fish_to_inventory(listing.user_id, listing.item_id, listing.quantity, listing.quality_level)
         else:
             raise ValueError(f"不支持的物品类型: {listing.item_type}")
 
+    @atomic_game_operation
     def delist_item(self, user_id: str, market_id: int) -> Dict[str, Any]:
         """
         用户下架自己的商品。
@@ -457,17 +462,12 @@ class MarketService:
             return {"success": False, "message": "你只能下架自己的商品"}
 
         # 将物品返还给用户
-        try:
-            self._return_listing_to_seller(listing)
-            self.market_repo.remove_listing(market_id)
+        self._return_listing_to_seller(listing)
+        self.market_repo.remove_listing(market_id)
 
-            quantity_text = f" x{listing.quantity}" if listing.quantity > 1 else ""
+        quantity_text = f" x{listing.quantity}" if listing.quantity > 1 else ""
 
-            return {"success": True, "message": f"✅ 成功下架【{listing.item_name}】{quantity_text}，物品已返还到背包/水族箱"}
-
-        except Exception as e:
-            logger.error(f"下架物品时发生错误: {e}")
-            return {"success": False, "message": f"下架失败: {str(e)}"}
+        return {"success": True, "message": f"✅ 成功下架【{listing.item_name}】{quantity_text}，物品已返还"}
 
     def get_user_listings(self, user_id: str) -> Dict[str, Any]:
         """
@@ -557,55 +557,52 @@ class MarketService:
             logger.error(f"获取管理员市场列表失败: {e}")
             return {"success": False, "message": f"获取市场列表失败: {e}"}
 
+    @atomic_game_operation
     def update_market_item_price(self, market_id: int, new_price: int) -> Dict[str, Any]:
         """
         管理员修改市场商品价格。
         """
-        try:
-            if new_price <= 0:
-                return {"success": False, "message": "价格必须大于0"}
-                
-            listing = self.market_repo.get_listing_by_id(market_id)
-            if not listing:
-                return {"success": False, "message": "商品不存在"}
+        if new_price <= 0:
+            return {"success": False, "message": "价格必须大于0"}
             
-            old_price = listing.price
-            listing.price = new_price
-            self.market_repo.update_listing(listing)
-            
-            return {
-                "success": True, 
-                "message": f"商品价格已从 {old_price} 金币修改为 {new_price} 金币"
-            }
-        except Exception as e:
-            logger.error(f"修改商品价格失败: {e}")
-            return {"success": False, "message": f"修改价格失败: {e}"}
+        listing = self.market_repo.get_listing_by_id(market_id)
+        if not listing:
+            return {"success": False, "message": "商品不存在"}
 
+        old_price = listing.price
+        listing.price = new_price
+        self.market_repo.update_listing(listing)
+
+        return {
+            "success": True,
+            "message": f"商品价格已从 {old_price} 金币修改为 {new_price} 金币"
+        }
+
+    @atomic_game_operation
     def remove_market_item_by_admin(self, market_id: int) -> Dict[str, Any]:
         """
         管理员下架商品，物品返还给卖家。
         """
-        try:
-            listing = self.market_repo.get_listing_by_id(market_id)
-            if not listing:
-                return {"success": False, "message": "商品不存在"}
-            
-            seller = self.user_repo.get_by_id(listing.user_id)
-            if not seller:
-                # 即使卖家不存在，也应该能移除商品，但无法返还
-                self.market_repo.remove_listing(market_id)
-                return {"success": True, "message": "商品已下架（卖家不存在，物品已清除）"}
-            
-            # 将物品返还给卖家
-            self._return_listing_to_seller(listing)
-            
-            # 从市场移除
+        listing = self.market_repo.get_listing_by_id(market_id)
+        if not listing:
+            return {"success": False, "message": "商品不存在"}
+
+        seller = self.user_repo.get_by_id(listing.user_id)
+        if not seller:
+            if listing.item_type == "rod" and self.inventory_repo.get_user_rod_instance_by_id("MARKET", listing.item_instance_id):
+                self.inventory_repo.delete_rod_instance(listing.item_instance_id)
+            elif listing.item_type == "accessory" and self.inventory_repo.get_user_accessory_instance_by_id("MARKET", listing.item_instance_id):
+                self.inventory_repo.delete_accessory_instance(listing.item_instance_id)
             self.market_repo.remove_listing(market_id)
-            
-            return {
-                "success": True, 
-                "message": f"商品已下架，已返还给卖家 {seller.nickname}"
-            }
-        except Exception as e:
-            logger.error(f"下架商品失败: {e}")
-            return {"success": False, "message": f"下架商品失败: {e}"}
+            return {"success": True, "message": "商品已下架（卖家不存在，物品已清除）"}
+
+        # 将物品返还给卖家
+        self._return_listing_to_seller(listing)
+
+        # 从市场移除
+        self.market_repo.remove_listing(market_id)
+
+        return {
+            "success": True,
+            "message": f"商品已下架，已返还给卖家 {seller.nickname}"
+        }

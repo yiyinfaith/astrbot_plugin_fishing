@@ -1,5 +1,6 @@
 from typing import Dict, Any, List
 
+from ..database.connection_manager import atomic_game_operation
 from ..repositories.abstract_repository import AbstractInventoryRepository, AbstractUserRepository, AbstractItemTemplateRepository
 from ..domain.models import AquariumUpgrade
 
@@ -54,8 +55,11 @@ class AquariumService:
             }
         }
 
+    @atomic_game_operation
     def add_fish_to_aquarium(self, user_id: str, fish_id: int, quantity: int = 1, quality_level: int = 0) -> Dict[str, Any]:
         """将鱼添加到水族箱"""
+        if quantity <= 0 or quality_level not in (0, 1):
+            return {"success": False, "message": "鱼的数量或品质无效"}
         # 检查用户是否存在
         user = self.user_repo.get_by_id(user_id)
         if not user:
@@ -91,8 +95,11 @@ class AquariumService:
             "message": f"成功将 {quality_label}{fish_template.name} x{quantity} 放入水族箱！"
         }
 
+    @atomic_game_operation
     def remove_fish_from_aquarium(self, user_id: str, fish_id: int, quantity: int = 1, quality_level: int = 0) -> Dict[str, Any]:
         """从水族箱移除鱼到鱼塘"""
+        if quantity <= 0 or quality_level not in (0, 1):
+            return {"success": False, "message": "鱼的数量或品质无效"}
         # 检查用户是否存在
         user = self.user_repo.get_by_id(user_id)
         if not user:
@@ -110,6 +117,10 @@ class AquariumService:
             quality_label = "✨高品质" if quality_level == 1 else "普通"
             return {"success": False, "message": f"水族箱中没有足够的{quality_label}{fish_template.name}"}
 
+        pond_count = sum(fish.quantity for fish in self.inventory_repo.get_fish_inventory(user_id))
+        if pond_count + quantity > user.fish_pond_capacity:
+            return {"success": False, "message": "鱼塘空间不足，无法移回这些鱼"}
+
         # 从水族箱移除鱼，添加到鱼塘（保持品质）
         self.inventory_repo.remove_fish_from_aquarium(user_id, fish_id, quantity, quality_level)
         self.inventory_repo.add_fish_to_inventory(user_id, fish_id, quantity, quality_level)
@@ -124,6 +135,7 @@ class AquariumService:
         """获取所有水族箱升级配置"""
         return self.inventory_repo.get_aquarium_upgrades()
 
+    @atomic_game_operation
     def upgrade_aquarium(self, user_id: str) -> Dict[str, Any]:
         """升级水族箱容量"""
         user = self.user_repo.get_by_id(user_id)
@@ -149,26 +161,11 @@ class AquariumService:
         user.coins -= upgrade_config.cost_coins
         user.aquarium_capacity = upgrade_config.capacity
 
-        try:
-            self.user_repo.update(user)
-            
-            # 验证更新是否生效
-            updated_user = self.user_repo.get_by_id(user_id)
-            if updated_user and updated_user.aquarium_capacity != upgrade_config.capacity:
-                return {
-                    "success": False,
-                    "message": f"升级失败：数据库更新异常（当前容量：{updated_user.aquarium_capacity}，期望容量：{upgrade_config.capacity}）"
-                }
-            
-            return {
-                "success": True,
-                "message": f"水族箱升级成功！新容量：{upgrade_config.capacity}，花费：{upgrade_config.cost_coins} 金币"
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "message": f"升级失败：{str(e)}"
-            }
+        self.user_repo.update(user)
+        return {
+            "success": True,
+            "message": f"水族箱升级成功！新容量：{upgrade_config.capacity}，花费：{upgrade_config.cost_coins} 金币"
+        }
 
     def _get_current_aquarium_level(self, capacity: int) -> int:
         """根据容量获取当前等级"""

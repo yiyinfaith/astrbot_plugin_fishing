@@ -27,13 +27,11 @@ async def user_backpack(plugin: "FishingPlugin", event: AstrMessageEvent):
     categories = {"rods": "鱼竿", "accessories": "饰品", "baits": "鱼饵", "items": "道具"}
     totals = {f"total_{category}": len(entries) for category, entries in backpack.items()}
     total_value = sum(
-        item["rarity"] * 1000 * (1 + max(item["refine_level"] - 1, 0) * 0.5)
+        item["sell_price"]
         for category in ("rods", "accessories") for item in backpack[category]
-    ) + sum(
-        item["rarity"] * 100 * item["quantity"]
-        for category in ("baits", "items") for item in backpack[category]
+        if not item["is_equipped"] and not item["is_locked"]
     )
-    summary = {**totals, "total_value": int(total_value), "nickname": nickname}
+    summary = {**totals, "total_value": total_value, "nickname": nickname}
     avatar = await get_user_avatar(user_id, plugin.data_dir, 60)
 
     supports_forward = event.get_platform_name() in {"aiocqhttp", "satori"}

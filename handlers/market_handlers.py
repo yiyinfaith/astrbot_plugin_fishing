@@ -279,7 +279,7 @@ async def shop(plugin: "FishingPlugin", event: AstrMessageEvent):
         # 按组ID分组成本
         cost_groups = {}
         for c in costs:
-            group_id = c.get("group_id", 1)  # 默认组ID为1
+            group_id = (c.get("group_id") or 0) if c.get("cost_relation") == "or" else 0
             if group_id not in cost_groups:
                 cost_groups[group_id] = []
             cost_groups[group_id].append(c)
@@ -350,8 +350,7 @@ async def shop(plugin: "FishingPlugin", event: AstrMessageEvent):
                 group_parts.append(group_parts_inner[0])
             else:
                 # 检查组内关系
-                relation = group_costs[0].get("cost_relation", "and")
-                if relation == "or":
+                if group_id:
                     group_parts.append(f"({' OR '.join(group_parts_inner)})")
                 else:  # and
                     group_parts.append(" + ".join(group_parts_inner))

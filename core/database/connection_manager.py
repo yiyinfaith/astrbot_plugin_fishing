@@ -1,10 +1,20 @@
 import sqlite3
 import threading
 import time
-from typing import Optional
 from contextlib import contextmanager
+from functools import wraps
 
 from astrbot.api import logger
+
+
+def atomic_game_operation(method):
+    """Run a synchronous gameplay operation in the shared write transaction."""
+    @wraps(method)
+    def wrapped(service, *args, **kwargs):
+        with service.inventory_repo.transaction():
+            return method(service, *args, **kwargs)
+
+    return wrapped
 
 
 class DatabaseConnectionManager:
@@ -43,8 +53,12 @@ class DatabaseConnectionManager:
     def get_connection(self):
         """获取线程本地连接，并确保失败事务不会遗留数据库锁。"""
         conn = self._get_connection()
-        try:
+        if getattr(self._local, "transaction_depth", 0):
             yield conn
+            return
+        try:
+            with conn:
+                yield conn
         except sqlite3.OperationalError as e:
             try:
                 conn.rollback()
@@ -64,23 +78,31 @@ class DatabaseConnectionManager:
     
     @contextmanager
     def transaction(self, immediate: bool = True):
-        """在单个写事务内执行多条语句，异常时整体回滚并释放写锁。
-
-        与 get_connection 的区别是显式接管 BEGIN/COMMIT，供需要跨多张表
-        保持原子性的仓储使用。
-        """
+        """Share a write transaction across repositories and nested operations."""
         conn = self._get_connection()
         cursor = conn.cursor()
+        depth = getattr(self._local, "transaction_depth", 0)
+        savepoint = f"fishing_{depth}"
+        cursor.execute(
+            f"SAVEPOINT {savepoint}" if depth else ("BEGIN IMMEDIATE" if immediate else "BEGIN")
+        )
+        self._local.transaction_depth = depth + 1
         try:
-            cursor.execute("BEGIN IMMEDIATE" if immediate else "BEGIN")
             yield cursor
-            conn.commit()
+            if depth:
+                cursor.execute(f"RELEASE SAVEPOINT {savepoint}")
+            else:
+                conn.commit()
         except BaseException:
-            try:
+            if depth:
+                cursor.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+                cursor.execute(f"RELEASE SAVEPOINT {savepoint}")
+            else:
                 conn.rollback()
-            except sqlite3.Error:
-                pass
             raise
+        finally:
+            self._local.transaction_depth = depth
+            cursor.close()
 
     def run_in_transaction(self, operation, immediate: bool = True):
         """执行 operation(cursor)，遇到数据库锁定时重放整个事务。
@@ -88,6 +110,9 @@ class DatabaseConnectionManager:
         事务失败会整体回滚，因此重放是安全的；operation 不应带有数据库之外
         的副作用。
         """
+        if getattr(self._local, "transaction_depth", 0):
+            with self.transaction(immediate=immediate) as cursor:
+                return operation(cursor)
         for attempt in range(self.max_retries + 1):
             try:
                 with self.transaction(immediate=immediate) as cursor:
@@ -132,39 +157,12 @@ class DatabaseConnectionManager:
         if fetch not in {"none", "one", "all"}:
             raise ValueError(f"不支持的 fetch 类型: {fetch}")
 
-        for attempt in range(self.max_retries + 1):
-            conn = self._get_connection()
-            try:
-                cursor = conn.cursor()
-                cursor.execute(query, params)
+        def execute(cursor):
+            cursor.execute(query, params)
+            if fetch == "one":
+                return cursor.fetchone()
+            if fetch == "all":
+                return cursor.fetchall()
+            return cursor.lastrowid or None
 
-                if fetch == "one":
-                    return cursor.fetchone()
-                if fetch == "all":
-                    return cursor.fetchall()
-
-                conn.commit()
-                return cursor.lastrowid if cursor.lastrowid else None
-            except sqlite3.OperationalError as e:
-                try:
-                    conn.rollback()
-                except sqlite3.Error:
-                    pass
-
-                is_locked = "database is locked" in str(e).lower()
-                self.close_connection()
-                if not is_locked or attempt >= self.max_retries:
-                    raise
-
-                delay = self.retry_delay * (attempt + 1)
-                logger.warning(
-                    f"数据库锁定，第 {attempt + 1}/{self.max_retries} 次重试，"
-                    f"等待 {delay:.2f}s: {e}"
-                )
-                time.sleep(delay)
-            except Exception:
-                try:
-                    conn.rollback()
-                except sqlite3.Error:
-                    pass
-                raise
+        return self.run_in_transaction(execute, immediate=False)

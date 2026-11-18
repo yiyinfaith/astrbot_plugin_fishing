@@ -1,5 +1,4 @@
 import sqlite3
-import threading
 from typing import Optional, List, Dict, Any, Set
 from datetime import datetime
 import json
@@ -19,13 +18,12 @@ class InsufficientFishQuantityError(Exception):
 class SqliteInventoryRepository(AbstractInventoryRepository):
     """用户库存仓储的SQLite实现"""
 
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, connection_manager: DatabaseConnectionManager | None = None):
         self.db_path = db_path
-        self._connection_manager = DatabaseConnectionManager(db_path)
+        self._connection_manager = connection_manager or DatabaseConnectionManager(db_path)
 
-    def _get_connection(self) -> sqlite3.Connection:
-        """获取一个线程安全的数据库连接。"""
-        return self._connection_manager.get_connection()
+    def transaction(self):
+        return self._connection_manager.transaction()
 
     def close_connection(self) -> None:
         """关闭当前线程持有的库存数据库连接。"""
@@ -118,7 +116,6 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
                 VALUES (?, ?, ?, ?)
                 ON CONFLICT(user_id, fish_id, quality_level) DO UPDATE SET quantity = quantity + excluded.quantity
             """, (user_id, fish_id, quality_level, quantity))
-            conn.commit()
 
     def clear_fish_inventory(self, user_id: str, rarity: Optional[int] = None) -> None:
         with self._connection_manager.get_connection() as conn:
@@ -132,7 +129,6 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
                         SELECT fish_id FROM fish WHERE rarity = ?
                     )
                 """, (user_id, rarity))
-            conn.commit()
 
 
     def sell_fish_atomic(
@@ -149,58 +145,51 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
             rarity_clause = f" AND f.rarity IN ({placeholders})"
             params.extend(rarity_values)
 
-        with self._connection_manager.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("BEGIN IMMEDIATE")
-            try:
-                cursor.execute(f"""
-                    SELECT f.rarity, ufi.quality_level,
-                           SUM(ufi.quantity) AS quantity,
-                           SUM(ufi.quantity * f.base_value * (1 + ufi.quality_level)) AS value
-                    FROM user_fish_inventory ufi
-                    JOIN fish f ON ufi.fish_id = f.fish_id
-                    WHERE ufi.user_id = ?{rarity_clause}
-                    GROUP BY f.rarity, ufi.quality_level
-                    HAVING quantity > 0
-                """, tuple(params))
-                rows = [dict(row) for row in cursor.fetchall()]
-                total_value = sum(int(row["value"] or 0) for row in rows)
+        with self._connection_manager.transaction() as cursor:
+            cursor.execute(f"""
+                SELECT f.rarity, ufi.quality_level,
+                       SUM(ufi.quantity) AS quantity,
+                       SUM(ufi.quantity * f.base_value * (1 + ufi.quality_level)) AS value
+                FROM user_fish_inventory ufi
+                JOIN fish f ON ufi.fish_id = f.fish_id
+                WHERE ufi.user_id = ?{rarity_clause}
+                GROUP BY f.rarity, ufi.quality_level
+                HAVING quantity > 0
+            """, tuple(params))
+            rows = [dict(row) for row in cursor.fetchall()]
+            total_value = sum(int(row["value"] or 0) for row in rows)
 
-                if total_value <= 0:
-                    conn.rollback()
-                    return {"total_value": 0, "details": []}
+            if total_value <= 0:
 
-                mutation_params: List[Any] = [user_id]
-                mutation_filter = ""
-                if rarity_values:
-                    placeholders = ", ".join("?" for _ in rarity_values)
-                    mutation_filter = (
-                        " AND fish_id IN "
-                        f"(SELECT fish_id FROM fish WHERE rarity IN ({placeholders}))"
-                    )
-                    mutation_params.extend(rarity_values)
+                return {"total_value": 0, "details": []}
 
-                cursor.execute(
-                    f"DELETE FROM user_fish_inventory WHERE user_id = ?{mutation_filter}",
-                    tuple(mutation_params),
+            mutation_params: List[Any] = [user_id]
+            mutation_filter = ""
+            if rarity_values:
+                placeholders = ", ".join("?" for _ in rarity_values)
+                mutation_filter = (
+                    " AND fish_id IN "
+                    f"(SELECT fish_id FROM fish WHERE rarity IN ({placeholders}))"
                 )
+                mutation_params.extend(rarity_values)
 
-                cursor.execute(
-                    """
-                    UPDATE users
-                    SET coins = coins + ?, max_coins = MAX(max_coins, coins + ?)
-                    WHERE user_id = ?
-                    """,
-                    (total_value, total_value, user_id),
-                )
-                if cursor.rowcount != 1:
-                    raise ValueError(f"用户 {user_id} 不存在")
+            cursor.execute(
+                f"DELETE FROM user_fish_inventory WHERE user_id = ?{mutation_filter}",
+                tuple(mutation_params),
+            )
 
-                conn.commit()
-                return {"total_value": total_value, "details": rows}
-            except Exception:
-                conn.rollback()
-                raise
+            cursor.execute(
+                """
+                UPDATE users
+                SET coins = coins + ?, max_coins = MAX(max_coins, coins + ?)
+                WHERE user_id = ?
+                """,
+                (total_value, total_value, user_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError(f"用户 {user_id} 不存在")
+
+            return {"total_value": total_value, "details": rows}
 
     def sell_everything_atomic(
         self,
@@ -218,85 +207,79 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
             "accessory_value": 0,
             "total_value": 0,
         }
-        with self._connection_manager.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("BEGIN IMMEDIATE")
-            try:
+        with self._connection_manager.transaction() as cursor:
+            cursor.execute(
+                """
+                SELECT COALESCE(SUM(ufi.quantity), 0),
+                       COALESCE(SUM(ufi.quantity * f.base_value * (1 + ufi.quality_level)), 0)
+                FROM user_fish_inventory ufi
+                JOIN fish f ON f.fish_id = ufi.fish_id
+                WHERE ufi.user_id = ?
+                """,
+                (user_id,),
+            )
+            result["fish_count"], result["fish_value"] = map(int, cursor.fetchone())
+
+            def select_sellable(table, id_column, prices):
+                if not prices:
+                    return []
                 cursor.execute(
-                    """
-                    SELECT COALESCE(SUM(ufi.quantity), 0),
-                           COALESCE(SUM(ufi.quantity * f.base_value * (1 + ufi.quality_level)), 0)
-                    FROM user_fish_inventory ufi
-                    JOIN fish f ON f.fish_id = ufi.fish_id
-                    WHERE ufi.user_id = ?
-                    """,
+                    f"SELECT {id_column} FROM {table} WHERE user_id = ? "
+                    f"AND is_locked = 0 AND is_equipped = 0",
                     (user_id,),
                 )
-                result["fish_count"], result["fish_value"] = map(int, cursor.fetchone())
+                return [
+                    int(row[0]) for row in cursor.fetchall() if int(row[0]) in prices
+                ]
 
-                def select_sellable(table, id_column, prices):
-                    if not prices:
-                        return []
+            def delete_instances(table, id_column, instance_ids):
+                # SQLite builds may cap bound variables at 999; delete large
+                # inventories in bounded batches while retaining one transaction.
+                for offset in range(0, len(instance_ids), 400):
+                    batch = instance_ids[offset:offset + 400]
+                    placeholders = ", ".join("?" for _ in batch)
                     cursor.execute(
-                        f"SELECT {id_column} FROM {table} WHERE user_id = ? "
-                        f"AND is_locked = 0 AND is_equipped = 0",
-                        (user_id,),
+                        f"DELETE FROM {table} WHERE user_id = ? "
+                        f"AND is_locked = 0 AND is_equipped = 0 "
+                        f"AND {id_column} IN ({placeholders})",
+                        (user_id, *batch),
                     )
-                    return [
-                        int(row[0]) for row in cursor.fetchall() if int(row[0]) in prices
-                    ]
 
-                def delete_instances(table, id_column, instance_ids):
-                    # SQLite builds may cap bound variables at 999; delete large
-                    # inventories in bounded batches while retaining one transaction.
-                    for offset in range(0, len(instance_ids), 400):
-                        batch = instance_ids[offset:offset + 400]
-                        placeholders = ", ".join("?" for _ in batch)
-                        cursor.execute(
-                            f"DELETE FROM {table} WHERE user_id = ? "
-                            f"AND is_locked = 0 AND is_equipped = 0 "
-                            f"AND {id_column} IN ({placeholders})",
-                            (user_id, *batch),
-                        )
+            rod_ids = select_sellable("user_rods", "rod_instance_id", rod_prices)
+            accessory_ids = select_sellable(
+                "user_accessories", "accessory_instance_id", accessory_prices
+            )
+            result["rod_count"] = len(rod_ids)
+            result["rod_value"] = sum(rod_prices[item_id] for item_id in rod_ids)
+            result["accessory_count"] = len(accessory_ids)
+            result["accessory_value"] = sum(
+                accessory_prices[item_id] for item_id in accessory_ids
+            )
+            result["total_value"] = (
+                result["fish_value"] + result["rod_value"] + result["accessory_value"]
+            )
 
-                rod_ids = select_sellable("user_rods", "rod_instance_id", rod_prices)
-                accessory_ids = select_sellable(
-                    "user_accessories", "accessory_instance_id", accessory_prices
-                )
-                result["rod_count"] = len(rod_ids)
-                result["rod_value"] = sum(rod_prices[item_id] for item_id in rod_ids)
-                result["accessory_count"] = len(accessory_ids)
-                result["accessory_value"] = sum(
-                    accessory_prices[item_id] for item_id in accessory_ids
-                )
-                result["total_value"] = (
-                    result["fish_value"] + result["rod_value"] + result["accessory_value"]
-                )
+            if result["total_value"] <= 0:
 
-                if result["total_value"] <= 0:
-                    conn.rollback()
-                    return result
-
-                cursor.execute("DELETE FROM user_fish_inventory WHERE user_id = ?", (user_id,))
-                delete_instances("user_rods", "rod_instance_id", rod_ids)
-                delete_instances(
-                    "user_accessories", "accessory_instance_id", accessory_ids
-                )
-                cursor.execute(
-                    """
-                    UPDATE users
-                    SET coins = coins + ?, max_coins = MAX(max_coins, coins + ?)
-                    WHERE user_id = ?
-                    """,
-                    (result["total_value"], result["total_value"], user_id),
-                )
-                if cursor.rowcount != 1:
-                    raise ValueError(f"用户 {user_id} 不存在")
-                conn.commit()
                 return result
-            except Exception:
-                conn.rollback()
-                raise
+
+            cursor.execute("DELETE FROM user_fish_inventory WHERE user_id = ?", (user_id,))
+            delete_instances("user_rods", "rod_instance_id", rod_ids)
+            delete_instances(
+                "user_accessories", "accessory_instance_id", accessory_ids
+            )
+            cursor.execute(
+                """
+                UPDATE users
+                SET coins = coins + ?, max_coins = MAX(max_coins, coins + ?)
+                WHERE user_id = ?
+                """,
+                (result["total_value"], result["total_value"], user_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError(f"用户 {user_id} 不存在")
+
+            return result
 
     def settle_fishing_catch(self, **settlement: Any) -> bool:
         """将一次成功钓鱼的所有最终写操作放在同一事务中。"""
@@ -306,135 +289,130 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
         quality_level = settlement["quality_level"]
         timestamp = settlement["timestamp"]
 
-        with self._connection_manager.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("BEGIN IMMEDIATE")
-            try:
+        with self._connection_manager.transaction() as cursor:
+            cursor.execute(
+                """
+                UPDATE users
+                SET coins = coins - ?,
+                    total_fishing_count = total_fishing_count + ?,
+                    total_weight_caught = total_weight_caught + ?,
+                    total_coins_earned = total_coins_earned + ?,
+                    last_fishing_time = ?
+                WHERE user_id = ? AND coins >= ?
+                """,
+                (
+                    settlement["fishing_cost"],
+                    total_catches,
+                    settlement["weight"] * total_catches,
+                    settlement["earned_value"],
+                    timestamp,
+                    user_id,
+                    settlement["fishing_cost"],
+                ),
+            )
+            if cursor.rowcount != 1:
+
+                return False
+
+            cursor.execute(
+                "SELECT COALESCE(SUM(quantity), 0) FROM user_fish_inventory WHERE user_id = ?",
+                (user_id,),
+            )
+            current_count = int(cursor.fetchone()[0])
+            overflow = max(
+                0,
+                current_count + total_catches - settlement["fish_pond_capacity"],
+            )
+            for _ in range(overflow):
                 cursor.execute(
                     """
-                    UPDATE users
-                    SET coins = coins - ?,
-                        total_fishing_count = total_fishing_count + ?,
-                        total_weight_caught = total_weight_caught + ?,
-                        total_coins_earned = total_coins_earned + ?,
-                        last_fishing_time = ?
-                    WHERE user_id = ? AND coins >= ?
+                    SELECT fish_id, quality_level
+                    FROM user_fish_inventory
+                    WHERE user_id = ? AND quantity > 0
+                    ORDER BY RANDOM() LIMIT 1
                     """,
-                    (
-                        settlement["fishing_cost"],
-                        total_catches,
-                        settlement["weight"],
-                        settlement["earned_value"],
-                        timestamp,
-                        user_id,
-                        settlement["fishing_cost"],
-                    ),
-                )
-                if cursor.rowcount != 1:
-                    conn.rollback()
-                    return False
-
-                cursor.execute(
-                    "SELECT COALESCE(SUM(quantity), 0) FROM user_fish_inventory WHERE user_id = ?",
                     (user_id,),
                 )
-                current_count = int(cursor.fetchone()[0])
-                overflow = max(
-                    0,
-                    current_count + total_catches - settlement["fish_pond_capacity"],
-                )
-                for _ in range(overflow):
-                    cursor.execute(
-                        """
-                        SELECT fish_id, quality_level
-                        FROM user_fish_inventory
-                        WHERE user_id = ? AND quantity > 0
-                        ORDER BY RANDOM() LIMIT 1
-                        """,
-                        (user_id,),
-                    )
-                    row = cursor.fetchone()
-                    if row is None:
-                        break
-                    cursor.execute(
-                        """
-                        UPDATE user_fish_inventory SET quantity = quantity - 1
-                        WHERE user_id = ? AND fish_id = ? AND quality_level = ?
-                        """,
-                        (user_id, row["fish_id"], row["quality_level"]),
-                    )
-                    cursor.execute(
-                        """
-                        DELETE FROM user_fish_inventory
-                        WHERE user_id = ? AND fish_id = ? AND quality_level = ? AND quantity <= 0
-                        """,
-                        (user_id, row["fish_id"], row["quality_level"]),
-                    )
-
+                row = cursor.fetchone()
+                if row is None:
+                    break
                 cursor.execute(
                     """
-                    INSERT INTO user_fish_inventory (user_id, fish_id, quality_level, quantity)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(user_id, fish_id, quality_level)
-                    DO UPDATE SET quantity = quantity + excluded.quantity
+                    UPDATE user_fish_inventory SET quantity = quantity - 1
+                    WHERE user_id = ? AND fish_id = ? AND quality_level = ?
                     """,
-                    (user_id, fish_id, quality_level, total_catches),
+                    (user_id, row["fish_id"], row["quality_level"]),
                 )
-
-                rod_instance_id = settlement.get("rod_instance_id")
-                rod_durability = settlement.get("rod_durability")
-                if rod_instance_id is not None and rod_durability is not None:
-                    cursor.execute(
-                        """
-                        UPDATE user_rods SET current_durability = ?
-                        WHERE user_id = ? AND rod_instance_id = ?
-                        """,
-                        (rod_durability, user_id, rod_instance_id),
-                    )
-                if settlement.get("rod_broken"):
-                    cursor.execute(
-                        """
-                        UPDATE user_rods SET is_equipped = 0
-                        WHERE user_id = ? AND rod_instance_id = ?
-                        """,
-                        (user_id, rod_instance_id),
-                    )
-                    cursor.execute(
-                        """
-                        UPDATE users SET equipped_rod_instance_id = NULL
-                        WHERE user_id = ? AND equipped_rod_instance_id = ?
-                        """,
-                        (user_id, rod_instance_id),
-                    )
-
                 cursor.execute(
                     """
-                    INSERT INTO user_fish_stats (
-                        user_id, fish_id, first_caught_at, last_caught_at,
-                        max_weight, min_weight, total_caught, total_weight
-                    ) VALUES (?, ?, ?, ?, ?, ?, 1, ?)
-                    ON CONFLICT(user_id, fish_id) DO UPDATE SET
-                        last_caught_at = excluded.last_caught_at,
-                        max_weight = MAX(max_weight, excluded.max_weight),
-                        min_weight = MIN(min_weight, excluded.min_weight),
-                        total_caught = total_caught + 1,
-                        total_weight = total_weight + excluded.total_weight
+                    DELETE FROM user_fish_inventory
+                    WHERE user_id = ? AND fish_id = ? AND quality_level = ? AND quantity <= 0
                     """,
-                    (
-                        user_id,
-                        fish_id,
-                        timestamp,
-                        timestamp,
-                        settlement["weight"],
-                        settlement["weight"],
-                        settlement["weight"],
-                    ),
+                    (user_id, row["fish_id"], row["quality_level"]),
                 )
-                conn.commit()
-                return True
-            except Exception:
-                conn.rollback()
-                raise
+
+            cursor.execute(
+                """
+                INSERT INTO user_fish_inventory (user_id, fish_id, quality_level, quantity)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(user_id, fish_id, quality_level)
+                DO UPDATE SET quantity = quantity + excluded.quantity
+                """,
+                (user_id, fish_id, quality_level, total_catches),
+            )
+
+            rod_instance_id = settlement.get("rod_instance_id")
+            rod_durability = settlement.get("rod_durability")
+            if rod_instance_id is not None and rod_durability is not None:
+                cursor.execute(
+                    """
+                    UPDATE user_rods SET current_durability = ?
+                    WHERE user_id = ? AND rod_instance_id = ?
+                    """,
+                    (rod_durability, user_id, rod_instance_id),
+                )
+            if settlement.get("rod_broken"):
+                cursor.execute(
+                    """
+                    UPDATE user_rods SET is_equipped = 0
+                    WHERE user_id = ? AND rod_instance_id = ?
+                    """,
+                    (user_id, rod_instance_id),
+                )
+                cursor.execute(
+                    """
+                    UPDATE users SET equipped_rod_instance_id = NULL
+                    WHERE user_id = ? AND equipped_rod_instance_id = ?
+                    """,
+                    (user_id, rod_instance_id),
+                )
+
+            cursor.execute(
+                """
+                INSERT INTO user_fish_stats (
+                    user_id, fish_id, first_caught_at, last_caught_at,
+                    max_weight, min_weight, total_caught, total_weight
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_id, fish_id) DO UPDATE SET
+                    last_caught_at = excluded.last_caught_at,
+                    max_weight = MAX(max_weight, excluded.max_weight),
+                    min_weight = MIN(min_weight, excluded.min_weight),
+                    total_caught = total_caught + excluded.total_caught,
+                    total_weight = total_weight + excluded.total_weight
+                """,
+                (
+                    user_id,
+                    fish_id,
+                    timestamp,
+                    timestamp,
+                    settlement["weight"],
+                    settlement["weight"],
+                    total_catches,
+                    settlement["weight"] * total_catches,
+                ),
+            )
+
+            return True
 
     def get_user_equipped_rod(self, user_id: str) -> Optional[UserRodInstance]:
         """获取用户当前装备的钓竿实例"""
@@ -468,7 +446,6 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
                     SELECT rod_id FROM rods WHERE rarity < 5
                 )
             """, (user_id,))
-            conn.commit()
 
     def clear_user_accessory_instances(self, user_id: str) -> None:
         """清空用户的所有未装备且小于5星的配件实例"""
@@ -480,7 +457,6 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
                     SELECT accessory_id FROM accessories WHERE rarity < 5
                 )
             """, (user_id,))
-            conn.commit()
 
     def get_user_accessory_instance_by_id(self, user_id: str, accessory_instance_id: int) -> Optional[UserAccessoryInstance]:
         """根据用户ID和配件实例ID获取特定的配件实例"""
@@ -528,7 +504,6 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
                     UPDATE user_accessories SET is_equipped = 1 WHERE accessory_instance_id = ? AND user_id = ?
                 """, (accessory_instance_id, user_id))
 
-            conn.commit()
 
 
     def get_user_disposable_baits(self, user_id: str) -> List[int]:
@@ -577,7 +552,6 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
             """, (user_id, bait_id, delta, delta))
             # 删除数量为0的行，保持数据整洁
             cursor.execute("DELETE FROM user_bait_inventory WHERE user_id = ? AND quantity <= 0", (user_id,))
-            conn.commit()
 
     # --- Item Inventory Methods ---
     def get_user_item_inventory(self, user_id: str) -> Dict[int, int]:
@@ -607,7 +581,6 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
                 (user_id, item_id, delta, delta),
             )
             cursor.execute("DELETE FROM user_items WHERE user_id = ? AND quantity <= 0", (user_id,))
-            conn.commit()
 
 
     # --- Rod Inventory Methods ---
@@ -626,7 +599,6 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
                 VALUES (?, ?, ?, ?, ?, 0, 0)
             """, (user_id, rod_id, durability, now, refine_level))
             instance_id = cursor.lastrowid
-            conn.commit()
             return UserRodInstance(
                 rod_instance_id=instance_id, user_id=user_id, rod_id=rod_id,
                 is_equipped=False, obtained_at=now, current_durability=durability, refine_level=refine_level, is_locked=False
@@ -635,8 +607,8 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
     def delete_rod_instance(self, rod_instance_id: int) -> None:
         with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
+            cursor.execute("UPDATE users SET equipped_rod_instance_id = NULL WHERE equipped_rod_instance_id = ?", (rod_instance_id,))
             cursor.execute("DELETE FROM user_rods WHERE rod_instance_id = ?", (rod_instance_id,))
-            conn.commit()
 
     # --- Accessory Inventory Methods ---
     def get_user_accessory_instances(self, user_id: str) -> List[UserAccessoryInstance]:
@@ -654,7 +626,6 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
                 VALUES (?, ?, ?, ?, 0, 0)
             """, (user_id, accessory_id, now, refine_level))
             instance_id = cursor.lastrowid
-            conn.commit()
             return UserAccessoryInstance(
                 accessory_instance_id=instance_id, user_id=user_id, accessory_id=accessory_id,
                 is_equipped=False, obtained_at=now, refine_level=refine_level, is_locked=False
@@ -663,8 +634,8 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
     def delete_accessory_instance(self, accessory_instance_id: int) -> None:
         with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
+            cursor.execute("UPDATE users SET equipped_accessory_instance_id = NULL WHERE equipped_accessory_instance_id = ?", (accessory_instance_id,))
             cursor.execute("DELETE FROM user_accessories WHERE accessory_instance_id = ?", (accessory_instance_id,))
-            conn.commit()
             
     def update_fish_quantity(self, user_id: str, fish_id: int, delta: int, quality_level: int = 0) -> None:
         """更新用户鱼类库存中特定鱼的数量（可增可减），并确保数量不小于0。"""
@@ -677,9 +648,8 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
             """, (user_id, fish_id, quality_level, delta, delta))
             # 删除数量为0的行，保持数据整洁
             cursor.execute("DELETE FROM user_fish_inventory WHERE user_id = ? AND quantity <= 0", (user_id,))
-            conn.commit()
 
-    def get_zone_by_id(self, zone_id: int) -> FishingZone:
+    def get_zone_by_id(self, zone_id: int) -> Optional[FishingZone]:
         """根据ID获取钓鱼区域信息"""
         with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
@@ -708,7 +678,7 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
                 zone.specific_fish_ids = self.get_specific_fish_ids_for_zone(zone.id)
                 return zone
             else:
-                raise ValueError(f"钓鱼区域ID {zone_id} 不存在。")
+                return None
     def set_zone_pass_requirement(self, zone_id: int, item_id: Optional[int]) -> None:
         """设置区域需要的通行证，item_id 为 None 表示不需要通行证。"""
         with self._connection_manager.get_connection() as conn:
@@ -716,7 +686,6 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
                 "UPDATE fishing_zones SET requires_pass = ?, required_item_id = ? WHERE id = ?",
                 (1 if item_id else 0, item_id, zone_id),
             )
-            conn.commit()
 
     def get_all_zones(self) -> List[FishingZone]:
         """获取所有钓鱼区域信息"""
@@ -758,7 +727,6 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
                 "UPDATE fishing_zones SET configs = ? WHERE id = ?",
                 (configs, zone_id)
             )
-            conn.commit()
 
     def create_zone(self, zone_data: Dict[str, Any]) -> FishingZone:
         with self._connection_manager.get_connection() as conn:
@@ -780,7 +748,6 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
                     zone_data.get('fishing_cost', 10),
                     zone_data.get('required_rod_rarity', 0),
                 ))
-                conn.commit()
             except sqlite3.IntegrityError as e:
                 if "UNIQUE constraint failed: fishing_zones.id" in str(e):
                     raise ValueError(f"钓鱼区域 ID {zone_data['id']} 已存在。")
@@ -809,13 +776,11 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
                 zone_data.get('required_rod_rarity', 0),
                 zone_id
             ))
-            conn.commit()
 
     def delete_zone(self, zone_id: int) -> None:
         with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM fishing_zones WHERE id = ?", (zone_id,))
-            conn.commit()
 
     def get_specific_fish_ids_for_zone(self, zone_id: int) -> List[int]:
         with self._connection_manager.get_connection() as conn:
@@ -830,7 +795,6 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
             if fish_ids:
                 cursor.executemany("INSERT INTO zone_fish_mapping (zone_id, fish_id) VALUES (?, ?)",
                                    [(zone_id, fish_id) for fish_id in fish_ids])
-            conn.commit()
 
     def update_rod_instance(self, rod_instance: UserRodInstance):
         """更新钓竿实例信息"""
@@ -841,7 +805,6 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
                 SET rod_id = ?, is_equipped = ?, current_durability = ?, refine_level = ?, is_locked = ?
                 WHERE rod_instance_id = ? AND user_id = ?
             """, (rod_instance.rod_id, rod_instance.is_equipped, rod_instance.current_durability, rod_instance.refine_level, rod_instance.is_locked, rod_instance.rod_instance_id, rod_instance.user_id))
-            conn.commit()
 
     def transfer_rod_instance_ownership(self, rod_instance_id: int, new_user_id: str) -> None:
         """转移鱼竿实例所有权"""
@@ -866,7 +829,8 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
                 SET user_id = ?, is_equipped = 0
                 WHERE rod_instance_id = ?
             """, (new_user_id, rod_instance_id))
-            conn.commit()
+            if cursor.rowcount != 1:
+                raise ValueError("待转移的鱼竿不存在")
 
     def update_accessory_instance(self, accessory_instance: UserAccessoryInstance):
         """更新配件实例信息"""
@@ -877,7 +841,6 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
                 SET accessory_id = ?, is_equipped = ?, refine_level = ?, is_locked = ?
                 WHERE accessory_instance_id = ? AND user_id = ?
             """, (accessory_instance.accessory_id, accessory_instance.is_equipped, accessory_instance.refine_level, accessory_instance.is_locked, accessory_instance.accessory_instance_id, accessory_instance.user_id))
-            conn.commit()
 
     def transfer_accessory_instance_ownership(self, accessory_instance_id: int, new_user_id: str) -> None:
         """转移饰品实例所有权"""
@@ -902,7 +865,8 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
                 SET user_id = ?, is_equipped = 0
                 WHERE accessory_instance_id = ?
             """, (new_user_id, accessory_instance_id))
-            conn.commit()
+            if cursor.rowcount != 1:
+                raise ValueError("待转移的饰品不存在")
 
     def get_same_rod_instances(self, user_id: int, rod_id: str) -> List[UserRodInstance]:
         """获取用户所有相同类型的钓竿实例"""
@@ -965,7 +929,6 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
                 ON CONFLICT(user_id, fish_id, quality_level) DO UPDATE SET 
                     quantity = quantity + excluded.quantity
             """, (user_id, fish_id, quality_level, quantity))
-            conn.commit()
 
     def remove_fish_from_aquarium(self, user_id: str, fish_id: int, quantity: int = 1, quality_level: int = 0) -> None:
         """从用户水族箱移除鱼
@@ -989,7 +952,6 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
                 DELETE FROM user_aquarium 
                 WHERE user_id = ? AND fish_id = ? AND quality_level = ? AND quantity <= 0
             """, (user_id, fish_id, quality_level))
-            conn.commit()
 
     def update_aquarium_fish_quantity(self, user_id: str, fish_id: int, delta: int, quality_level: int = 0) -> None:
         """更新用户水族箱中鱼的数量"""
@@ -1011,7 +973,6 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
                         SELECT fish_id FROM fish WHERE rarity = ?
                     )
                 """, (user_id, rarity))
-            conn.commit()
 
     def get_aquarium_total_count(self, user_id: str) -> int:
         """获取用户水族箱中鱼的总数量"""
@@ -1082,56 +1043,49 @@ class SqliteInventoryRepository(AbstractInventoryRepository):
         """
         智能扣除指定品质的鱼类：优先从鱼塘扣除，不足时从水族箱扣除。
         """
-        with self._connection_manager.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("BEGIN TRANSACTION")
-            try:
-                # 1. 获取鱼塘中特定品质鱼的数量
-                cursor.execute("""
-                    SELECT quantity FROM user_fish_inventory 
-                    WHERE user_id = ? AND fish_id = ? AND quality_level = ?
-                """, (user_id, fish_id, quality_level))
-                pond_row = cursor.fetchone()
-                pond_count = pond_row['quantity'] if pond_row else 0
-                
-                remaining_qty = quantity
-                
-                # 2. 优先从鱼塘扣除
-                if pond_count > 0:
-                    deduct_from_pond = min(pond_count, remaining_qty)
-                    if deduct_from_pond > 0:
-                        cursor.execute("""
-                            UPDATE user_fish_inventory
-                            SET quantity = quantity - ?
-                            WHERE user_id = ? AND fish_id = ? AND quality_level = ?
-                        """, (deduct_from_pond, user_id, fish_id, quality_level))
-                        cursor.execute("""
-                            DELETE FROM user_fish_inventory
-                            WHERE user_id = ? AND fish_id = ? AND quality_level = ? AND quantity <= 0
-                        """, (user_id, fish_id, quality_level))
-                        remaining_qty -= deduct_from_pond
-                
-                # 3. 如果还需要更多，从水族箱扣除
-                if remaining_qty > 0:
+        with self._connection_manager.transaction() as cursor:
+            # 1. 获取鱼塘中特定品质鱼的数量
+            cursor.execute("""
+                SELECT quantity FROM user_fish_inventory
+                WHERE user_id = ? AND fish_id = ? AND quality_level = ?
+            """, (user_id, fish_id, quality_level))
+            pond_row = cursor.fetchone()
+            pond_count = pond_row['quantity'] if pond_row else 0
+
+            remaining_qty = quantity
+
+            # 2. 优先从鱼塘扣除
+            if pond_count > 0:
+                deduct_from_pond = min(pond_count, remaining_qty)
+                if deduct_from_pond > 0:
                     cursor.execute("""
-                        UPDATE user_aquarium
+                        UPDATE user_fish_inventory
                         SET quantity = quantity - ?
-                        WHERE user_id = ? AND fish_id = ? AND quality_level = ? AND quantity >= ?
-                    """, (remaining_qty, user_id, fish_id, quality_level, remaining_qty))
-                    if cursor.rowcount == 0:
-                        raise ValueError(
-                            f"逻辑错误：用户 {user_id} 的鱼类 {fish_id} (品质 {quality_level}) "
-                            f"总数不足以扣除 {quantity}，但在扣除阶段发现不足。"
-                        )
+                        WHERE user_id = ? AND fish_id = ? AND quality_level = ?
+                    """, (deduct_from_pond, user_id, fish_id, quality_level))
                     cursor.execute("""
-                        DELETE FROM user_aquarium
+                        DELETE FROM user_fish_inventory
                         WHERE user_id = ? AND fish_id = ? AND quality_level = ? AND quantity <= 0
                     """, (user_id, fish_id, quality_level))
+                    remaining_qty -= deduct_from_pond
 
-                conn.commit()
-            except Exception:
-                conn.rollback()
-                raise
+            # 3. 如果还需要更多，从水族箱扣除
+            if remaining_qty > 0:
+                cursor.execute("""
+                    UPDATE user_aquarium
+                    SET quantity = quantity - ?
+                    WHERE user_id = ? AND fish_id = ? AND quality_level = ? AND quantity >= ?
+                """, (remaining_qty, user_id, fish_id, quality_level, remaining_qty))
+                if cursor.rowcount == 0:
+                    raise ValueError(
+                        f"逻辑错误：用户 {user_id} 的鱼类 {fish_id} (品质 {quality_level}) "
+                        f"总数不足以扣除 {quantity}，但在扣除阶段发现不足。"
+                    )
+                cursor.execute("""
+                    DELETE FROM user_aquarium
+                    WHERE user_id = ? AND fish_id = ? AND quality_level = ? AND quantity <= 0
+                """, (user_id, fish_id, quality_level))
+
 
     def get_aquarium_upgrades(self) -> List[AquariumUpgrade]:
         """获取所有水族箱升级配置"""

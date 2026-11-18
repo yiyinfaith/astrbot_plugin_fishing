@@ -5,7 +5,10 @@ import shutil
 import sqlite3
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 import astrbot_stub
 
@@ -108,6 +111,252 @@ class GameRuleTests(unittest.TestCase):
                 [(pool_id, "2026-11-19")],
             )
 
+    def test_sign_in_rolls_back_and_only_one_concurrent_claim_credits_coins(self):
+        uid = self.new_user(coins=100)
+        user_service = self.plugin.user_service
+        with patch.object(self.plugin.log_repo, "add_check_in", side_effect=RuntimeError("check-in failed")):
+            with self.assertRaisesRegex(RuntimeError, "check-in failed"):
+                user_service.daily_sign_in(uid)
+        self.assertEqual(self.coins(uid), 100)
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(user_service.daily_sign_in, (uid, uid)))
+        success, = [result for result in results if result["success"]]
+        self.assertEqual(self.coins(uid), 100 + success["coins_reward"] + success["bonus_coins"])
+
+    def test_paid_draw_rolls_back_currency_and_previously_granted_rewards(self):
+        uid = self.new_user(coins=100_000)
+        pool = next(pool for pool in self.plugin.gacha_repo.get_all_pools() if pool.cost_coins)
+        gacha = self.plugin.gacha_service
+        original = gacha._grant_reward
+        grants = 0
+
+        def fail_after_first(*args):
+            nonlocal grants
+            grants += 1
+            if grants == 2:
+                raise RuntimeError("reward failed")
+            return original(*args)
+
+        before = self.plugin.user_service.get_user_inventory_for_admin(uid)
+        with patch.object(gacha, "_grant_reward", side_effect=fail_after_first):
+            with self.assertRaisesRegex(RuntimeError, "reward failed"):
+                gacha.perform_draw(uid, pool.gacha_pool_id, 10)
+        self.assertEqual(grants, 2)
+        self.assertEqual(self.coins(uid), 100_000)
+        self.assertEqual(self.plugin.user_service.get_user_inventory_for_admin(uid), before)
+
+    def test_shop_rolls_back_items_coins_and_stock_on_record_failure(self):
+        uid = self.new_user(coins=1000)
+        item_id = self.shop_item("新手木竿")
+        shop = self.plugin.shop_repo
+        stock_sold = shop.get_shop_item_by_id(item_id)["stock_sold"]
+        with patch.object(shop, "add_purchase_record", side_effect=RuntimeError("record failed")):
+            with self.assertRaisesRegex(RuntimeError, "record failed"):
+                self.plugin.shop_service.purchase_item(uid, item_id, 2)
+        self.assertEqual(self.coins(uid), 1000)
+        self.assertEqual(len(self.inventory.get_user_rod_instances(uid)), 1)
+        self.assertEqual(shop.get_shop_item_by_id(item_id)["stock_sold"], stock_sold)
+
+    def test_shop_combines_coin_choice_and_both_fish_qualities_and_grants_all_equipment(self):
+        uid = self.new_user(coins=1000)
+        fish_id = self.templates.get_all_fish()[0].fish_id
+        rod_id = self.templates.get_all_rods()[0].rod_id
+        shop = self.plugin.shop_repo
+        offer_id = shop.create_shop_item(1, {"name": "品质兑换测试"})["item_id"]
+        self.addCleanup(shop.delete_shop_item, offer_id)
+        for row in (
+            {"cost_type": "fish", "cost_item_id": fish_id, "cost_amount": 1, "quality_level": 0},
+            {"cost_type": "fish", "cost_item_id": fish_id, "cost_amount": 1, "quality_level": 1},
+            {"cost_type": "coins", "cost_amount": 10, "group_id": 1, "cost_relation": "or"},
+            {"cost_type": "rod", "cost_item_id": rod_id, "cost_amount": 1, "group_id": 1, "cost_relation": "or"},
+        ):
+            shop.add_item_cost(offer_id, row)
+        shop.add_item_reward(offer_id, {"reward_type": "rod", "reward_item_id": rod_id, "reward_quantity": 2})
+        self.inventory.add_fish_to_inventory(uid, fish_id, 1, 0)
+        self.inventory.add_fish_to_aquarium(uid, fish_id, 1, 1)
+        result = self.plugin.shop_service.purchase_item(uid, offer_id)
+        self.assertTrue(result["success"], result)
+        self.assertEqual(self.coins(uid), 990)
+        self.assertEqual(len(self.inventory.get_user_rod_instances(uid)), 3)
+        self.assertEqual(self.inventory.get_fish_inventory(uid), [])
+        self.assertEqual(self.inventory.get_aquarium_inventory(uid), [])
+
+    def test_shop_can_choose_a_fish_exchange_to_make_room_in_full_aquarium(self):
+        uid = self.new_user(coins=100)
+        source, reward = self.templates.get_all_fish()[:2]
+        user = self.plugin.user_repo.get_by_id(uid)
+        user.aquarium_capacity = 1
+        self.plugin.user_repo.update(user)
+        self.inventory.add_fish_to_aquarium(uid, source.fish_id, 1)
+        shop = self.plugin.shop_repo
+        offer = shop.create_shop_item(1, {"name": "容量兑换测试"})["item_id"]
+        self.addCleanup(shop.delete_shop_item, offer)
+        shop.add_item_cost(offer, {"cost_type": "coins", "cost_amount": 10, "group_id": 1, "cost_relation": "or"})
+        shop.add_item_cost(offer, {"cost_type": "fish", "cost_item_id": source.fish_id, "cost_amount": 1, "group_id": 1, "cost_relation": "or"})
+        shop.add_item_reward(offer, {"reward_type": "fish", "reward_item_id": reward.fish_id, "reward_quantity": 1})
+        result = self.plugin.shop_service.purchase_item(uid, offer)
+        self.assertTrue(result["success"], result)
+        self.assertEqual(self.coins(uid), 100)
+        fish, = self.inventory.get_aquarium_inventory(uid)
+        self.assertEqual((fish.fish_id, fish.quantity), (reward.fish_id, 1))
+
+    def test_market_failure_rolls_back_then_only_one_buyer_can_settle(self):
+        seller = self.new_user(coins=100)
+        buyers = [self.new_user(coins=100) for _ in range(2)]
+        item = self.templates.get_all_items()[0]
+        self.inventory.update_item_quantity(seller, item.item_id, 1)
+        service = self.plugin.market_service
+        self.assertTrue(service.put_item_on_sale(seller, "item", item.item_id, 50)["success"])
+        seller_after_fee = 100 - int(50 * service.config["market"]["listing_tax_rate"])
+        listing = next(row for row in self.plugin.market_repo.get_all_listings()[0] if row.user_id == seller)
+        with patch.object(self.plugin.market_repo, "remove_listing", side_effect=RuntimeError("listing failed")):
+            with self.assertRaisesRegex(RuntimeError, "listing failed"):
+                service.buy_market_item(buyers[0], listing.market_id)
+        self.assertEqual(self.coins(seller), seller_after_fee)
+        self.assertEqual([self.coins(buyer) for buyer in buyers], [100, 100])
+        self.assertEqual(self.inventory.get_user_item_inventory(buyers[0]), {})
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(lambda buyer: service.buy_market_item(buyer, listing.market_id), buyers))
+        self.assertEqual(sum(bool(result["success"]) for result in results), 1)
+        self.assertEqual(self.coins(seller), seller_after_fee + 50)
+        self.assertEqual(sorted(self.coins(buyer) for buyer in buyers), [50, 100])
+        self.assertEqual(sum(self.inventory.get_user_item_inventory(buyer).get(item.item_id, 0) for buyer in buyers), 1)
+
+    def test_market_expiration_prevents_purchase_and_returns_inventory(self):
+        from datetime import timedelta
+        from importlib import import_module
+
+        market_module = import_module(f"{PLUGIN_DIR.name}.core.services.market_service")
+        seller = self.new_user(coins=100)
+        buyer = self.new_user(coins=100)
+        item = self.templates.get_all_items()[0]
+        self.inventory.update_item_quantity(seller, item.item_id, 1)
+        service = self.plugin.market_service
+        with patch.object(market_module, "get_now", return_value=market_module.get_now() - timedelta(days=6)):
+            self.assertTrue(service.put_item_on_sale(seller, "item", item.item_id, 50)["success"])
+        listing = next(row for row in self.plugin.market_repo.get_all_listings()[0] if row.user_id == seller)
+        result = service.buy_market_item(buyer, listing.market_id)
+        self.assertFalse(result["success"])
+        self.assertIn("过期", result["message"])
+        self.assertEqual(self.coins(buyer), 100)
+        self.assertEqual(self.inventory.get_user_item_inventory(seller)[item.item_id], 1)
+        self.assertIsNone(self.plugin.market_repo.get_listing_by_id(listing.market_id))
+
+    def test_aquarium_transfer_does_not_lose_fish_and_respects_pond_capacity(self):
+        uid = self.new_user()
+        fish = self.templates.get_all_fish()[0]
+        user = self.plugin.user_repo.get_by_id(uid)
+        user.fish_pond_capacity = 2
+        self.plugin.user_repo.update(user)
+        self.inventory.add_fish_to_inventory(uid, fish.fish_id, 2, 1)
+        service = self.plugin.aquarium_service
+        with patch.object(self.inventory, "add_fish_to_aquarium", side_effect=RuntimeError("transfer failed")):
+            with self.assertRaisesRegex(RuntimeError, "transfer failed"):
+                service.add_fish_to_aquarium(uid, fish.fish_id, 1, 1)
+        self.assertEqual(self.inventory.get_fish_inventory(uid)[0].quantity, 2)
+        self.assertTrue(service.add_fish_to_aquarium(uid, fish.fish_id, 1, 1)["success"])
+        self.inventory.add_fish_to_inventory(uid, fish.fish_id, 1, 0)
+        self.assertFalse(service.remove_fish_from_aquarium(uid, fish.fish_id, 1, 1)["success"])
+        self.assertEqual(self.inventory.get_aquarium_inventory(uid)[0].quantity, 1)
+
+    def test_manual_and_auto_cast_share_cooldown_and_charge_first_disposable_bait(self):
+        uid = self.new_user(coins=100)
+        bait = next(bait for bait in self.templates.get_all_baits() if not bait.duration_minutes and not bait.required_rod_rarity)
+        self.inventory.update_bait_quantity(uid, bait.bait_id, 2)
+        self.plugin.user_repo.set_auto_fishing_enabled(uid, True)
+        with patch(f"{PLUGIN_DIR.name}.core.services.fishing_service.random.random", return_value=0.9999):
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                results = list(executor.map(lambda auto: self.plugin.fishing_service.go_fish(uid, auto=auto), (False, True)))
+        self.assertEqual(sum("fishing_cost" in result for result in results), 1)
+        self.assertEqual(self.coins(uid), 90)
+        self.assertEqual(self.inventory.get_user_bait_inventory(uid)[bait.bait_id], 1)
+
+    def test_multiple_catches_update_pokedex_count_and_total_weight(self):
+        from importlib import import_module
+
+        get_now = import_module(f"{PLUGIN_DIR.name}.core.utils").get_now
+        uid = self.new_user(coins=100)
+        fish = self.templates.get_all_fish()[0]
+        self.assertTrue(self.inventory.settle_fishing_catch(
+            user_id=uid, fish_id=fish.fish_id, total_catches=3, quality_level=0,
+            weight=100, earned_value=fish.base_value * 3, fishing_cost=10,
+            fish_pond_capacity=480, timestamp=get_now(),
+        ))
+        user = self.plugin.user_repo.get_by_id(uid)
+        stat = self.plugin.log_repo.get_user_fish_stat(uid, fish.fish_id)
+        self.assertEqual((user.total_fishing_count, user.total_weight_caught), (3, 300))
+        self.assertEqual((stat.total_caught, stat.total_weight, stat.max_weight, stat.min_weight), (3, 300, 100, 100))
+
+    def test_electric_fishing_preserves_high_quality_and_total_fish_count(self):
+        victim = self.new_user(coins=100)
+        thief = self.new_user(coins=100)
+        fish = next(fish for fish in self.templates.get_all_fish() if fish.rarity < 5)
+        self.inventory.add_fish_to_inventory(victim, fish.fish_id, 100, 1)
+        with patch(f"{PLUGIN_DIR.name}.core.services.game_mechanics_service.random.random", return_value=0.1):
+            result = self.plugin.game_mechanics_service.electric_fish(thief, victim)
+        self.assertTrue(result["success"], result)
+        caught, = self.inventory.get_fish_inventory(thief)
+        remaining, = self.inventory.get_fish_inventory(victim)
+        self.assertEqual((caught.quality_level, remaining.quality_level), (1, 1))
+        self.assertEqual(caught.quantity + remaining.quantity, 100)
+
+    def test_open_all_money_bags_keeps_invalid_stack_and_consumes_working_ones(self):
+        uid = self.new_user(coins=100)
+        bag = next(item for item in self.templates.get_all_items() if item.effect_type == "ADD_COINS")
+        self.inventory.update_item_quantity(uid, bag.item_id, 2)
+        getter = self.templates.get_item_by_id
+        with patch.object(self.templates, "get_item_by_id", side_effect=lambda item_id: replace(getter(item_id), effect_payload="[]")):
+            failed = self.plugin.inventory_service.open_all_money_bags(uid)
+        self.assertFalse(failed["success"])
+        self.assertEqual(self.inventory.get_user_item_inventory(uid)[bag.item_id], 2)
+        self.assertEqual(self.coins(uid), 100)
+        success = self.plugin.inventory_service.open_all_money_bags(uid)
+        self.assertEqual(success["opened_bags"], 2)
+        self.assertEqual(self.coins(uid), 100 + success["total_gained"])
+        self.assertNotIn(bag.item_id, self.inventory.get_user_item_inventory(uid))
+
+    def test_cast_item_only_consumes_for_casts_that_could_take_place(self):
+        uid = self.new_user(coins=10)
+        item = next(item for item in self.templates.get_all_items() if item.effect_type == "RESET_FISHING_COOLDOWN")
+        self.inventory.update_item_quantity(uid, item.item_id, 2)
+        with patch(f"{PLUGIN_DIR.name}.core.services.fishing_service.random.random", return_value=0.9999):
+            result = self.plugin.inventory_service.use_item(uid, item.item_id, 2)
+        self.assertEqual(result["quantity_used"], 1)
+        self.assertEqual(self.inventory.get_user_item_inventory(uid)[item.item_id], 1)
+        self.assertEqual(self.coins(uid), 0)
+
+    def test_refinement_prefers_unrestricted_shield_and_keeps_main_equipment(self):
+        uid = self.new_user(coins=1_000_000)
+        template = next(rod for rod in self.templates.get_all_rods() if rod.rarity == 3)
+        target = self.inventory.add_rod_instance(uid, template.rod_id, template.durability, 6)
+        self.inventory.add_rod_instance(uid, template.rod_id, template.durability)
+        shields = [item for item in self.templates.get_all_items() if item.effect_type == "REFINE_DESTRUCTION_SHIELD"]
+        limited = next(item for item in shields if "max_rarity" in item.effect_payload and '"keep"' in item.effect_payload)
+        unlimited = next(item for item in shields if "max_rarity" not in item.effect_payload and '"keep"' in item.effect_payload)
+        self.inventory.update_item_quantity(uid, limited.item_id, 1)
+        self.inventory.update_item_quantity(uid, unlimited.item_id, 1)
+        original = self.templates.get_all_items
+
+        def templates_with_null_limit():
+            return [
+                replace(item, effect_payload='{"mode":"keep","max_rarity":null}')
+                if item.item_id == unlimited.item_id else item
+                for item in original()
+            ]
+
+        service = self.plugin.inventory_service
+        with (
+            patch.object(self.templates, "get_all_items", side_effect=templates_with_null_limit),
+            patch.object(service, "_determine_failure_type", return_value="destruction"),
+            patch(f"{PLUGIN_DIR.name}.core.services.inventory_service.random.random", return_value=0.9999),
+        ):
+            result = service.refine(uid, target.rod_instance_id, "rod")
+        self.assertTrue(result["failed"])
+        self.assertFalse(result["destroyed"])
+        self.assertEqual(self.inventory.get_user_rod_instance_by_id(uid, target.rod_instance_id).refine_level, 6)
+        self.assertEqual(self.inventory.get_user_item_inventory(uid).get(limited.item_id), 1)
+        self.assertNotIn(unlimited.item_id, self.inventory.get_user_item_inventory(uid))
+
     # 3. 区域二要 2 星鱼竿，区域三要 3 星鱼竿和通行证
     def test_zone_gates(self):
         service = self.plugin.fishing_service
@@ -155,6 +404,7 @@ class GameRuleTests(unittest.TestCase):
         # 自动钓鱼遇到这种情况会回到新手港湾继续钓
         user = self.plugin.user_repo.get_by_id(uid)
         user.last_fishing_time = None
+        user.auto_fishing_enabled = True
         self.plugin.user_repo.update(user)
         service._process_auto_fishing_user(uid)
         self.assertEqual(self.plugin.user_repo.get_by_id(uid).fishing_zone_id, 1)

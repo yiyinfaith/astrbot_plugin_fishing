@@ -8,6 +8,7 @@ from datetime import timedelta
 from astrbot.api import logger
 
 # 导入仓储接口和领域模型
+from ..database.connection_manager import atomic_game_operation
 from ..repositories.abstract_repository import (
     AbstractUserRepository,
     AbstractInventoryRepository,
@@ -18,7 +19,7 @@ from ..repositories.abstract_repository import (
 from ..domain.models import FishingZone, UserBuff
 from ..services.fishing_zone_service import FishingZoneService
 from .fish_weight_service import FishWeightService
-from ..utils import get_now, get_last_reset_time, calculate_after_refine
+from ..utils import ensure_aware, get_now, get_last_reset_time, calculate_after_refine
 
 # 抽中「6 星及以上」后各星级的默认相对权重（可在配置中修改），星级越高越难出；没列出的星级权重为 1
 HIGH_RARITY_WEIGHTS = {6: 15, 7: 4, 8: 1}
@@ -123,7 +124,8 @@ class FishingService:
         else:
             return {"success": True, "message": "🚫 自动钓鱼已关闭！"}
 
-    def go_fish(self, user_id: str) -> Dict[str, Any]:
+    @atomic_game_operation
+    def go_fish(self, user_id: str, *, auto: bool | None = None) -> Dict[str, Any]:
         """
         执行一次完整的钓鱼动作。
 
@@ -137,17 +139,26 @@ class FishingService:
         if not user:
             return {"success": False, "message": "用户不存在，无法钓鱼。"}
 
+        if auto and not user.auto_fishing_enabled:
+            return {"success": False, "message": "自动钓鱼未开启"}
+
+        now = get_now()
+        last_fished = ensure_aware(user.last_fishing_time)
+        if auto is not None and last_fished and last_fished.year > 1:
+            wait = self.get_cooldown_seconds(user_id, auto=auto) - (now - last_fished).total_seconds()
+            if wait > 0:
+                return {"success": False, "message": f"⏳ 还需等待 {math.ceil(wait)} 秒才能再次钓鱼。"}
+
         # 1. 检查成本（从区域配置中读取）
         zone = self.inventory_repo.get_zone_by_id(user.fishing_zone_id)
         if not zone:
-            return {"success": False, "message": "钓鱼区域不存在"}
+            return self._zone_requirement_failure(user, "钓鱼区域不存在", auto)
         
         # 检查区域是否激活
         if not zone.is_active:
-            return {"success": False, "message": "该钓鱼区域被浓雾隐匿了，暂时无法进入"}
+            return self._zone_requirement_failure(user, "该钓鱼区域被浓雾隐匿了，暂时无法进入", auto)
         
         # 检查时间限制
-        now = get_now()
         if zone.available_from and now < zone.available_from:
             return {"success": False, "message": f"该钓鱼区域将在 {zone.available_from.strftime('%Y-%m-%d %H:%M')} 开放"}
         
@@ -162,26 +173,28 @@ class FishingService:
 
         rod_error = self._get_zone_rod_requirement_error(user_id, zone)
         if rod_error:
-            return {"success": False, "message": rod_error, "zone_requirement_failed": True}
+            return self._zone_requirement_failure(user, rod_error, auto)
 
         if user.current_bait_id is not None:
             bait_template = self.item_template_repo.get_bait_by_id(user.current_bait_id)
             if bait_template:
                 requirement_error = self._get_bait_rod_requirement_error(user_id, bait_template)
                 if requirement_error:
-                    user.current_bait_id = None
-                    user.bait_start_time = None
+                    if bait_template.duration_minutes > 0 and user.bait_start_time:
+                        self.inventory_repo.update_bait_quantity(user_id, user.current_bait_id, -1)
                     self.user_repo.update_bait_state(user_id, None, None)
                     return {"success": False, "message": requirement_error}
         
         fishing_cost = zone.fishing_cost
         if not user.can_afford(fishing_cost):
+            if auto:
+                self.user_repo.set_auto_fishing_enabled(user_id, False)
             return {"success": False, "message": f"金币不足，需要 {fishing_cost} 金币。"}
 
         # 需要通行证的区域：当天第一次钓鱼时消耗 1 张
         pass_error, pass_notice = self._use_zone_pass_if_needed(user_id, zone)
         if pass_error:
-            return {"success": False, "message": pass_error, "zone_requirement_failed": True}
+            return self._zone_requirement_failure(user, pass_error, auto)
         notices = [pass_notice] if pass_notice else []
 
         # 2. 计算各种加成和修正值
@@ -232,112 +245,22 @@ class FishingService:
                 rare_chance += calculate_after_refine(acc_template.bonus_rare_fish_chance, refine_level= equipped_accessory_instance.refine_level, rarity=acc_template.rarity)
                 coins_chance += calculate_after_refine(acc_template.bonus_coin_modifier, refine_level= equipped_accessory_instance.refine_level, rarity=acc_template.rarity) - 1
         logger.debug(f"装备饰品加成后： quality_modifier={quality_modifier}, quantity_modifier={quantity_modifier}, rare_chance={rare_chance}, coins_chance={coins_chance}")
-        # 获取鱼饵并应用加成
-        cur_bait_id = user.current_bait_id
+        bait_template = self._prepare_bait(user, now)
         garbage_reduction_modifier = None
-
-        # 判断鱼饵是否过期
-        if user.current_bait_id is not None:
-            bait_template = self.item_template_repo.get_bait_by_id(cur_bait_id)
-            if bait_template:
-                requirement_error = self._get_bait_rod_requirement_error(user_id, bait_template)
-                if requirement_error:
-                    user.current_bait_id = None
-                    user.bait_start_time = None
-                    self.user_repo.update_bait_state(user_id, None, None)
-                    return {"success": False, "message": requirement_error}
-
-            if bait_template and bait_template.duration_minutes > 0:
-                # 检查鱼饵是否过期
-                bait_expiry_time = user.bait_start_time
-                if bait_expiry_time:
-                    now = get_now()
-                    expiry_time = bait_expiry_time + timedelta(minutes=bait_template.duration_minutes)
-                    # 移除两个时间的时区信息
-                    if now.tzinfo is not None:
-                        now = now.replace(tzinfo=None)
-                    if expiry_time.tzinfo is not None:
-                        expiry_time = expiry_time.replace(tzinfo=None)
-                    if now > expiry_time:
-                        # 鱼饵已过期，清除当前鱼饵
-                        user.current_bait_id = None
-                        user.bait_start_time = None
-                        self.inventory_repo.update_bait_quantity(user_id, cur_bait_id, -1)
-                        self.user_repo.update_bait_state(user_id, None, None)
-                        logger.warning(f"用户 {user_id} 的当前鱼饵{bait_template}已过期，已被清除。")
-            else:
-                if bait_template:
-                    # 如果鱼饵没有设置持续时间, 是一次性鱼饵，消耗一个鱼饵
-                    user_bait_inventory = self.inventory_repo.get_user_bait_inventory(user_id)
-                    if user_bait_inventory is not None and user_bait_inventory.get(user.current_bait_id, 0) > 0:
-                        self.inventory_repo.update_bait_quantity(user_id, user.current_bait_id, -1)
-                    else:
-                        # 如果用户没有库存鱼饵，清除当前鱼饵
-                        user.current_bait_id = None
-                        user.bait_start_time = None
-                        self.user_repo.update_bait_state(user_id, None, None)
-                        logger.warning(f"用户 {user_id} 的当前鱼饵{bait_template.bait_id}已被清除，因为库存不足。")
-                else:
-                    # 如果鱼饵模板不存在，清除当前鱼饵
-                    user.current_bait_id = None
-                    user.bait_start_time = None
-                    self.user_repo.update_bait_state(user_id, None, None)
-                    logger.warning(f"用户 {user_id} 的当前鱼饵已被清除，因为鱼饵模板不存在。")
-
-        if user.current_bait_id is None:
-            is_renewed = False
-            # 1. 优先尝试续上刚才使用的同款鱼饵
-            if cur_bait_id is not None:
-                user_bait_inventory = self.inventory_repo.get_user_bait_inventory(user_id)
-                # 如果同款鱼饵还有库存，则自动续上同款
-                if user_bait_inventory is not None and user_bait_inventory.get(cur_bait_id, 0) > 0:
-                    bait_template = self.item_template_repo.get_bait_by_id(cur_bait_id)
-                    if bait_template and self._get_bait_rod_requirement_error(user_id, bait_template) is None:
-                        user.current_bait_id = cur_bait_id
-
-                        # 如果是限时型鱼饵，自动续期时需要重置它的生效开始时间
-                        if bait_template.duration_minutes > 0:
-                            user.bait_start_time = get_now()
-
-                        self.user_repo.update_bait_state(
-                            user_id, user.current_bait_id, user.bait_start_time
-                        )
-                        logger.info(f"用户 {user_id} 自动续装了同款鱼饵: {cur_bait_id}")
-                        is_renewed = True
-            
-            # 2. 如果同款已经彻底用光了（未成功续杯），则随机抓取背包里的其他鱼饵
-            if not is_renewed:
-                random_bait_id = self._get_random_usable_bait_id(user.user_id)
-                if random_bait_id:
-                    user.current_bait_id = random_bait_id
-                    
-                    # 为新随机到的鱼饵初始化时间（如果抽到的是限时鱼饵）
-                    new_bait_template = self.item_template_repo.get_bait_by_id(random_bait_id)
-                    if new_bait_template and new_bait_template.duration_minutes > 0:
-                        user.bait_start_time = get_now()
-                    
-                    self.user_repo.update_bait_state(
-                        user_id, user.current_bait_id, user.bait_start_time
-                    )
-                    logger.info(f"用户 {user_id} 同款耗尽，自动随机切换至新鱼饵: {random_bait_id}")
-
-        if user.current_bait_id is not None:
-            bait_template = self.item_template_repo.get_bait_by_id(user.current_bait_id)
-            # logger.info(f"鱼饵信息: {bait_template}")
-            if bait_template:
-                quantity_modifier *= bait_template.quantity_modifier
-                rare_chance += bait_template.rare_chance_modifier
-                base_success_rate += bait_template.success_rate_modifier
-                garbage_reduction_modifier = bait_template.garbage_reduction_modifier
-                coins_chance += bait_template.value_modifier - 1
-                weight_modifier *= getattr(bait_template, "weight_modifier", 1.0) or 1.0
+        if bait_template:
+            quantity_modifier *= bait_template.quantity_modifier
+            rare_chance += bait_template.rare_chance_modifier
+            base_success_rate += bait_template.success_rate_modifier
+            garbage_reduction_modifier = bait_template.garbage_reduction_modifier
+            coins_chance += bait_template.value_modifier - 1
+            weight_modifier *= getattr(bait_template, "weight_modifier", 1.0) or 1.0
         logger.debug(f"使用鱼饵加成后： base_success_rate={base_success_rate}, quality_modifier={quality_modifier}, quantity_modifier={quantity_modifier}, rare_chance={rare_chance}, coins_chance={coins_chance}, weight_modifier={weight_modifier}")
         # 3. 判断是否成功钓到
         if random.random() >= base_success_rate:
             # 失败逻辑
             if not self.user_repo.record_failed_fishing(user_id, fishing_cost, get_now()):
                 return {"success": False, "message": f"金币不足，需要 {fishing_cost} 金币。"}
-            return {"success": False, "message": "💨 什么都没钓到...", "notices": notices}
+            return {"success": False, "message": "💨 什么都没钓到...", "notices": notices, "fishing_cost": fishing_cost}
 
         # 4. 成功，生成渔获
         # 使用区域策略获取基础稀有度分布
@@ -368,7 +291,7 @@ class FishingService:
         fish_template = self._get_fish_template(rarity, zone, coins_chance)
 
         if not fish_template:
-             return {"success": False, "message": "错误：当前条件下没有可钓的鱼！"}
+            raise ValueError("当前钓鱼区域没有可用的鱼类模板")
 
         # 如果有垃圾鱼减少修正，则应用，价值 < 5则被视为垃圾鱼
         if garbage_reduction_modifier is not None and fish_template.base_value < 5:
@@ -427,6 +350,7 @@ class FishingService:
             fractional = quantity_modifier - int(quantity_modifier)
             if fractional > 0 and random.random() < fractional:
                 total_catches += 1
+        total_catches = min(total_catches, max(1, user.fish_pond_capacity))
 
         # 5. 计算装备变化，最终与库存、统计和日志一起原子提交。
         equipment_broken_messages = []
@@ -468,10 +392,12 @@ class FishingService:
         # 7. 构建成功返回结果
         result = {
             "success": True,
+            "fishing_cost": fishing_cost,
             "fish": {
                 "name": fish_template.name,
                 "rarity": fish_template.rarity,
                 "weight": weight,
+                "quantity": total_catches,
                 "value": value * 2 if quality_level == 1 else value,  # 高品质鱼双倍价值
                 "quality_level": quality_level,  # 添加品质等级
                 "quality_label": "✨高品质" if quality_level == 1 else "普通"  # 添加品质标签
@@ -485,6 +411,49 @@ class FishingService:
             result["notices"] = notices
 
         return result
+
+    def _zone_requirement_failure(self, user, message, auto):
+        if auto:
+            self.user_repo.set_fishing_zone(user.user_id, 1)
+            first_zone = self.inventory_repo.get_zone_by_id(1)
+            message += f"\n🏠 已回到{first_zone.name if first_zone else '1 号区域'}继续自动钓鱼"
+        return {"success": False, "message": message, "zone_requirement_failed": True}
+
+    def _prepare_bait(self, user, now):
+        """Apply and charge the bait selected for this cast."""
+        previous_id = user.current_bait_id
+        previous_start = ensure_aware(user.bait_start_time)
+        bait_id = previous_id
+        start_time = None
+        template = self.item_template_repo.get_bait_by_id(bait_id) if bait_id else None
+        inventory = self.inventory_repo.get_user_bait_inventory(user.user_id)
+
+        if template and inventory.get(bait_id, 0) > 0:
+            if template.duration_minutes > 0:
+                if previous_start and now < previous_start + timedelta(minutes=template.duration_minutes):
+                    return template
+                if previous_start:
+                    self.inventory_repo.update_bait_quantity(user.user_id, bait_id, -1)
+                    inventory[bait_id] -= 1
+            if inventory.get(bait_id, 0) <= 0:
+                template = None
+        else:
+            template = None
+
+        if template is None:
+            bait_id = self._get_random_usable_bait_id(user.user_id)
+            template = self.item_template_repo.get_bait_by_id(bait_id) if bait_id else None
+        if template and template.duration_minutes > 0:
+            start_time = now
+        elif template:
+            quantity = inventory.get(bait_id, 0)
+            self.inventory_repo.update_bait_quantity(user.user_id, bait_id, -1)
+            if quantity == 1:
+                bait_id = None
+
+        if (bait_id, start_time) != (previous_id, previous_start):
+            self.user_repo.update_bait_state(user.user_id, bait_id, start_time)
+        return template
 
     def get_user_pokedex(self, user_id: str) -> Dict[str, Any]:
         """获取用户的图鉴信息。"""
@@ -723,6 +692,7 @@ class FishingService:
             cooldown /= efficiency
         return cooldown
 
+    @atomic_game_operation
     def set_user_fishing_zone(self, user_id: str, zone_id: int) -> Dict[str, Any]:
         """
         设置用户的钓鱼区域。
@@ -860,41 +830,10 @@ class FishingService:
 
     def _process_auto_fishing_user(self, user_id: str) -> None:
         """处理单个自动钓鱼用户，异常由循环按用户隔离。"""
-        user = self.user_repo.get_by_id(user_id)
-        if not user:
-            return
-
-        # 自动钓鱼按效率放慢出竿间隔，收益低于手动
-        cooldown = self.get_cooldown_seconds(user_id, auto=True)
-        now_ts = get_now().timestamp()
-        last_ts = 0
-        if user.last_fishing_time and user.last_fishing_time.year > 1:
-            last_ts = user.last_fishing_time.timestamp()
-        if now_ts - last_ts < cooldown:
-            return
-
-        zone = self.inventory_repo.get_zone_by_id(user.fishing_zone_id)
-        if not zone:
-            return
-        fishing_cost = zone.fishing_cost
-        if not user.can_afford(fishing_cost):
-            self.user_repo.set_auto_fishing_enabled(user_id, False)
-            logger.warning(
-                f"用户 {user_id} 金币不足（需要 {fishing_cost} 金币），已关闭自动钓鱼"
-            )
-            return
-
-        result = self.go_fish(user_id)
-        if not result:
-            return
-        if not result.get("success") and "已自动传送回" in result.get("message", ""):
-            self._notify(user_id, f"🌅 {result['message']}")
-        if result.get("zone_requirement_failed"):
-            # 鱼竿坏了或通行证用完：回到新手港湾继续自动钓鱼
-            self.user_repo.set_fishing_zone(user_id, 1)
-            first_zone = self.inventory_repo.get_zone_by_id(1)
-            self._notify(user_id, f"{result['message']}\n🏠 已回到{first_zone.name if first_zone else '1 号区域'}继续自动钓鱼")
-            return
+        result = self.go_fish(user_id, auto=True)
+        message = result.get("message", "")
+        if result.get("zone_requirement_failed") or "已自动传送回" in message:
+            self._notify(user_id, message)
 
         for msg in result.get("equipment_broken_messages") or []:
             self._notify(user_id, msg)

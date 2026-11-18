@@ -126,6 +126,29 @@ class AdminApiTests(unittest.TestCase):
         self.assertTrue(all(r.startswith("/astrbot_plugin_fishing/") for r in routes))
         self.assertEqual(len(routes), len(set(routes)))
 
+    def test_shop_write_endpoint_rolls_back_when_reward_cannot_be_saved(self):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, patch
+
+        from astrbot.api import web
+
+        shop = self.plugin.shop_repo
+        before = shop.get_shop_items(1)
+        rod = self.plugin.item_template_repo.get_all_rods()[0]
+        request = SimpleNamespace(query={}, json=AsyncMock(return_value={
+            "shop_id": 1, "name": "完整事务测试",
+            "costs": [{"cost_type": "coins", "cost_amount": 10}],
+            "rewards": [{"reward_type": "rod", "reward_item_id": rod.rod_id}],
+        }))
+        handler = next(r[1] for r in self.context.registered_web_apis if r[0].endswith("/shops/items/save"))
+        with (
+            patch.object(web, "request", request),
+            patch.object(shop, "add_item_reward", side_effect=RuntimeError("reward insert failed")),
+        ):
+            response = run(handler())
+        self.assertEqual(response["status"], "error")
+        self.assertEqual(shop.get_shop_items(1), before)
+
     def test_reload_replaces_only_this_plugins_admin_routes(self):
         from unittest.mock import patch
 

@@ -1,29 +1,19 @@
 import sqlite3
-import threading
 from typing import Optional, List
 from datetime import date, datetime, timedelta, timezone
 from astrbot.api import logger
 # 导入抽象基类和领域模型
+from ..database.connection_manager import DatabaseConnectionManager
 from .abstract_repository import AbstractLogRepository
 from ..domain.models import UserFishStat
 
 class SqliteLogRepository(AbstractLogRepository):
     """日志类数据仓储的SQLite实现"""
 
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, connection_manager: DatabaseConnectionManager | None = None):
         self.db_path = db_path
-        self._local = threading.local()
-        # 定义UTC+8时区
+        self._connection_manager = connection_manager or DatabaseConnectionManager(db_path)
         self.UTC8 = timezone(timedelta(hours=8))
-    def _get_connection(self) -> sqlite3.Connection:
-        """获取一个线程安全的数据库连接。"""
-        conn = getattr(self._local, "connection", None)
-        if conn is None:
-            conn = sqlite3.connect(self.db_path, detect_types=sqlite3.PARSE_DECLTYPES)
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA foreign_keys = ON;")
-            self._local.connection = conn
-        return conn
 
     def _row_to_user_fish_stat(self, row: sqlite3.Row) -> Optional[UserFishStat]:
         if not row:
@@ -33,7 +23,7 @@ class SqliteLogRepository(AbstractLogRepository):
 
     # --- Check-in Log Methods ---
     def add_check_in(self, user_id: str, check_in_date: date) -> None:
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             # 1) 写入签到记录
             cursor.execute(
@@ -66,10 +56,9 @@ class SqliteLogRepository(AbstractLogRepository):
                 (cutoff_date,),
             )
 
-            conn.commit()
 
     def has_checked_in(self, user_id: str, check_in_date: date) -> bool:
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT 1 FROM check_ins WHERE user_id = ? AND check_in_date = ?",
@@ -83,7 +72,7 @@ class SqliteLogRepository(AbstractLogRepository):
 
     # --- 用户鱼类统计（用于图鉴与个人纪录） ---
     def get_user_fish_stats(self, user_id: str) -> List[UserFishStat]:
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
@@ -98,7 +87,7 @@ class SqliteLogRepository(AbstractLogRepository):
             return [self._row_to_user_fish_stat(row) for row in cursor.fetchall()]
 
     def get_user_fish_stat(self, user_id: str, fish_id: int) -> Optional[UserFishStat]:
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """

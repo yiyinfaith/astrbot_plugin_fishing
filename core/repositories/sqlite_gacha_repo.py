@@ -1,31 +1,19 @@
 import sqlite3
-import threading
 from datetime import date
 from typing import Optional, List, Dict, Any
 
 # 导入抽象基类和领域模型
+from ..database.connection_manager import DatabaseConnectionManager
 from .abstract_repository import AbstractGachaRepository
 from ..domain.models import GachaPool, GachaPoolItem
 
 class SqliteGachaRepository(AbstractGachaRepository):
     """抽卡仓储的SQLite实现"""
 
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, connection_manager: DatabaseConnectionManager | None = None):
         self.db_path = db_path
-        self._local = threading.local()
+        self._connection_manager = connection_manager or DatabaseConnectionManager(db_path)
 
-    def _get_connection(self) -> sqlite3.Connection:
-        """获取一个线程安全的数据库连接。"""
-        conn = getattr(self._local, "connection", None)
-        if conn is None:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            # 开启外键约束，确保奖池删除时，其下的物品也被删除
-            conn.execute("PRAGMA foreign_keys = ON;")
-            self._local.connection = conn
-        return conn
-
-    # --- 私有映射辅助方法 ---
     def _row_to_gacha_pool(self, row: sqlite3.Row) -> Optional[GachaPool]:
         if not row:
             return None
@@ -38,7 +26,7 @@ class SqliteGachaRepository(AbstractGachaRepository):
 
     # --- Gacha Read Methods ---
     def get_pool_by_id(self, pool_id: int) -> Optional[GachaPool]:
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM gacha_pools WHERE gacha_pool_id = ?", (pool_id,))
             pool_row = cursor.fetchone()
@@ -50,10 +38,10 @@ class SqliteGachaRepository(AbstractGachaRepository):
             return pool
 
     def get_pool_items(self, pool_id: int) -> List[GachaPoolItem]:
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             # 获取指定抽卡池的所有物品以及物品的详细信息
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT
@@ -84,7 +72,7 @@ class SqliteGachaRepository(AbstractGachaRepository):
             return items
 
     def get_all_pools(self) -> List[GachaPool]:
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM gacha_pools ORDER BY gacha_pool_id")
             rows = cursor.fetchall()  # 只获取一次结果
@@ -101,16 +89,16 @@ class SqliteGachaRepository(AbstractGachaRepository):
 
     def get_free_pools(self) -> List[GachaPool]:
         """查找所有免费的抽卡池"""
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT * FROM gacha_pools WHERE cost_coins = 0"
+                "SELECT * FROM gacha_pools WHERE cost_coins = 0 ORDER BY gacha_pool_id"
             )
             return [self._row_to_gacha_pool(row) for row in cursor.fetchall()]
 
     def claim_daily_supply(self, user_id: str, pool_id: int, claim_date: date) -> bool:
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.execute("""
                 INSERT INTO daily_supply_claims (user_id, gacha_pool_id, claim_date)
                 VALUES (?, ?, ?)
@@ -120,19 +108,12 @@ class SqliteGachaRepository(AbstractGachaRepository):
             """, (user_id, pool_id, claim_date.isoformat()))
             return cursor.rowcount == 1
 
-    def release_daily_supply(self, user_id: str, pool_id: int, claim_date: date) -> None:
-        with self._get_connection() as conn:
-            conn.execute("""
-                DELETE FROM daily_supply_claims
-                WHERE user_id = ? AND gacha_pool_id = ? AND claim_date = ?
-            """, (user_id, pool_id, claim_date.isoformat()))
-
     # --- Admin Panel CRUD Methods ---
 
     # Pool CRUD
     def add_pool_template(self, data: Dict[str, Any]) -> None:
         """后台添加一个新抽卡池"""
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO gacha_pools (name, description, cost_coins, is_limited_time, open_until)
@@ -144,12 +125,11 @@ class SqliteGachaRepository(AbstractGachaRepository):
                 "is_limited_time": 1 if data.get("is_limited_time") in (True, "1", 1, "on") else 0,
                 "open_until": data.get("open_until")
             })
-            conn.commit()
 
     def update_pool_template(self, pool_id: int, data: Dict[str, Any]) -> None:
         """后台更新一个抽卡池的信息"""
         data["gacha_pool_id"] = pool_id
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 UPDATE gacha_pools SET
@@ -167,18 +147,16 @@ class SqliteGachaRepository(AbstractGachaRepository):
                 "is_limited_time": 1 if data.get("is_limited_time") in (True, "1", 1, "on") else 0,
                 "open_until": data.get("open_until")
             })
-            conn.commit()
 
     def delete_pool_template(self, pool_id: int) -> None:
         """后台删除一个抽卡池（其下的物品也会被级联删除）"""
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM gacha_pools WHERE gacha_pool_id = ?", (pool_id,))
-            conn.commit()
 
     def copy_pool_template(self, pool_id: int) -> int:
         """复制一个抽卡池及其所有物品，返回新的pool_id"""
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             
             # 获取原卡池信息
@@ -218,7 +196,6 @@ class SqliteGachaRepository(AbstractGachaRepository):
                     item['weight']
                 ))
             
-            conn.commit()
             return new_pool_id
 
     # Pool Item CRUD
@@ -229,7 +206,7 @@ class SqliteGachaRepository(AbstractGachaRepository):
             return
         item_type, item_id = item_full_id
 
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO gacha_pool_items (gacha_pool_id, item_type, item_id, quantity, weight)
@@ -241,7 +218,6 @@ class SqliteGachaRepository(AbstractGachaRepository):
                 data.get("quantity", 1),
                 data.get("weight", 10)
             ))
-            conn.commit()
 
     def update_pool_item(self, item_pool_id: int, data: Dict[str, Any]) -> None:
         """后台更新一个抽卡池物品的信息，支持部分更新"""
@@ -279,14 +255,12 @@ class SqliteGachaRepository(AbstractGachaRepository):
         set_clause = ", ".join(updates)
         query = f"UPDATE gacha_pool_items SET {set_clause} WHERE gacha_pool_item_id = ?"
 
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(query, tuple(params))
-            conn.commit()
 
     def delete_pool_item(self, item_pool_id: int) -> None:
         """后台删除一个抽卡池物品"""
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM gacha_pool_items WHERE gacha_pool_item_id = ?", (item_pool_id,))
-            conn.commit()

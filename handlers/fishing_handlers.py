@@ -1,6 +1,5 @@
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api import logger
-from ..core.utils import get_now
 from ..utils import safe_get_file_path
 from ..draw.pokedex import draw_pokedex
 from typing import TYPE_CHECKING
@@ -9,17 +8,8 @@ if TYPE_CHECKING:
     from ..main import FishingPlugin
 
 
-def _normalize_now_for(lst_time):
-    """根据 lst_time 的时区信息，规范化当前时间的 tzinfo。"""
-    now = get_now()
-    if lst_time and lst_time.tzinfo is None and now.tzinfo is not None:
-        return now.replace(tzinfo=None)
-    if lst_time and lst_time.tzinfo is not None and now.tzinfo is None:
-        return now.replace(tzinfo=lst_time.tzinfo)
-    return now
-
-
-def _build_fish_message(result, fishing_cost):
+def _build_fish_message(result):
+    fishing_cost = result.get("fishing_cost")
     if result["success"]:
         fish = result['fish']
         # 构建品质显示
@@ -28,7 +18,7 @@ def _build_fish_message(result, fishing_cost):
             quality_display = " ✨高品质"
         
         message = (
-            f"🎣 恭喜你钓到了：{fish['name']}{quality_display}\n"
+            f"🎣 恭喜你钓到了：{fish['name']}{quality_display} ×{fish['quantity']}\n"
             f"✨稀有度：{'★' * fish['rarity']} \n"
             f"⚖️重量：{fish['weight']} 克\n"
             f"💰价值：{fish['value']} 金币\n"
@@ -40,8 +30,7 @@ def _build_fish_message(result, fishing_cost):
         for notice in result.get("notices") or []:
             message += f"\n{notice}"
         return message
-    if result.get("zone_requirement_failed"):
-        # 没满足区域条件，这一竿没有钓，也没有扣钱
+    if fishing_cost is None:
         return result["message"]
     message = f"{result['message']}\n💸消耗：{fishing_cost} 金币/次"
     for notice in result.get("notices") or []:
@@ -61,33 +50,11 @@ class FishingHandlers:
         self.item_template_repo = plugin.item_template_repo
         self.aquarium_service = plugin.aquarium_service
 
-    def _get_fishing_cost(self, user):
-        zone = self.plugin.inventory_repo.get_zone_by_id(user.fishing_zone_id)
-        return zone.fishing_cost if zone else 10
-
     async def fish(self, event: AstrMessageEvent):
         """钓鱼"""
         user_id = self.plugin._get_effective_user_id(event)
-        user = self.plugin.user_repo.get_by_id(user_id)
-        if not user:
-            yield event.plain_result("❌ 您还没有注册，请先使用 /钓鱼注册 命令注册。")
-            return
-        # 检查用户钓鱼CD
-        lst_time = user.last_fishing_time
-        # 饰品的冷却倍率（如海洋之心）在这里生效
-        cooldown_seconds = self.fishing_service.get_cooldown_seconds(user_id)
-        # 修复时区问题
-        now = _normalize_now_for(lst_time)
-        if lst_time and (now - lst_time).total_seconds() < cooldown_seconds:
-            wait_time = cooldown_seconds - (now - lst_time).total_seconds()
-            yield event.plain_result(f"⏳ 您还需要等待 {int(wait_time)} 秒才能再次钓鱼。")
-            return
-        fishing_cost = self._get_fishing_cost(user)
-        result = self.fishing_service.go_fish(user_id)
-        if not result:
-            yield event.plain_result("❌ 出错啦！请稍后再试。")
-            return
-        yield event.plain_result(_build_fish_message(result, fishing_cost))
+        result = self.fishing_service.go_fish(user_id, auto=False)
+        yield event.plain_result(_build_fish_message(result))
 
     async def auto_fish(self, event: AstrMessageEvent):
         """自动钓鱼"""

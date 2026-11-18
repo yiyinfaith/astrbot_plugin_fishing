@@ -14,9 +14,12 @@ import csv
 import dataclasses
 import inspect
 import io
+import math
 import os
 import sqlite3
+from contextlib import nullcontext
 from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -246,19 +249,18 @@ def _int(value: Any, label: str, *, default: Any = ..., minimum: Optional[int] =
     if isinstance(value, bool):
         raise ApiError(f"{label}必须是整数")
     try:
-        number = float(value) if isinstance(value, str) else value
-        if isinstance(number, float):
-            if not number.is_integer():
-                raise ValueError
-            number = int(number)
-        number = int(number)
-    except (TypeError, ValueError):
-        raise ApiError(f"{label}必须是整数")
+        number = Decimal(str(value))
+        if not number.is_finite() or number != number.to_integral_value():
+            raise ValueError
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ApiError(f"{label}必须是整数") from exc
     if minimum is not None and number < minimum:
         raise ApiError(f"{label}不能小于 {minimum}")
     if maximum is not None and number > maximum:
         raise ApiError(f"{label}不能大于 {maximum}")
-    return number
+    if not -(2 ** 63) <= number < 2 ** 63:
+        raise ApiError(f"{label}超出可保存的整数范围")
+    return int(number)
 
 
 def _float(value: Any, label: str, *, default: Any = ..., minimum: Optional[float] = None,
@@ -271,8 +273,10 @@ def _float(value: Any, label: str, *, default: Any = ..., minimum: Optional[floa
         raise ApiError(f"{label}必须是数字")
     try:
         number = float(value)
-    except (TypeError, ValueError):
-        raise ApiError(f"{label}必须是数字")
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ApiError(f"{label}必须是数字") from exc
+    if not math.isfinite(number):
+        raise ApiError(f"{label}必须是有限数字")
     if minimum is not None and number < minimum:
         raise ApiError(f"{label}不能小于 {minimum}")
     if maximum is not None and number > maximum:
@@ -402,7 +406,8 @@ class FishingAdminAPI:
             if not isinstance(body, dict):
                 return error_response("请求体必须是 JSON 对象")
             try:
-                result = await self.call(fn, query, body)
+                with self.p.database.transaction() if method == "POST" else nullcontext():
+                    result = await self.call(fn, query, body)
             except ApiError as exc:
                 return error_response(str(exc), status_code=exc.status)
             except Exception as exc:  # pragma: no cover - 记录意外错误
@@ -1069,9 +1074,17 @@ class FishingAdminAPI:
         rewards = self._parse_rewards(body.get("rewards") or [])
         if not rewards:
             raise ApiError("至少需要设置一个奖励")
+        for row in costs:
+            kind = row["cost_type"]
+            if kind != "coins" and not self._template(kind, row["cost_item_id"]):
+                raise ApiError("消耗物品不存在")
+        for row in rewards:
+            if not self._template(row["reward_type"], row["reward_item_id"]):
+                raise ApiError("奖励物品不存在")
         item_id = _int(body.get("item_id"), "商品 ID", optional=True, minimum=1)
         if item_id:
-            if not repo.get_shop_item_by_id(item_id):
+            existing = repo.get_shop_item_by_id(item_id)
+            if not existing or existing["shop_id"] != shop_id:
                 raise ApiError("商品不存在", 404)
             repo.update_shop_item(item_id, item_data)
             for cost in repo.get_item_costs(item_id):
@@ -1092,6 +1105,8 @@ class FishingAdminAPI:
             raise ApiError("消耗设置格式无效")
         costs = []
         for index, row in enumerate(rows, start=1):
+            if not isinstance(row, dict):
+                raise ApiError(f"第 {index} 条消耗的格式无效")
             cost_type = row.get("cost_type")
             if cost_type not in ("coins", "fish", "item", "rod", "accessory"):
                 raise ApiError(f"第 {index} 条消耗的类型无效")
@@ -1105,6 +1120,8 @@ class FishingAdminAPI:
                 "group_id": _int(row.get("group_id"), f"第 {index} 条消耗的组 ID", optional=True, minimum=1),
                 "quality_level": _int(row.get("quality_level"), "品质", default=0, minimum=0, maximum=1) if cost_type == "fish" else 0,
             }
+            if relation == "or" and cost["group_id"] is None:
+                raise ApiError(f"第 {index} 条可选消耗必须填写组 ID")
             if cost_type in ("fish", "item", "rod", "accessory"):
                 cost["cost_item_id"] = _int(row.get("cost_item_id"), f"第 {index} 条消耗的物品", minimum=1)
             costs.append(cost)
@@ -1116,6 +1133,8 @@ class FishingAdminAPI:
             raise ApiError("奖励设置格式无效")
         rewards = []
         for index, row in enumerate(rows, start=1):
+            if not isinstance(row, dict):
+                raise ApiError(f"第 {index} 条奖励的格式无效")
             reward_type = row.get("reward_type")
             if reward_type not in ("rod", "bait", "accessory", "item", "fish"):
                 raise ApiError(f"第 {index} 条奖励的类型无效")

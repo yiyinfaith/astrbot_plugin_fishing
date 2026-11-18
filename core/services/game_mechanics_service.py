@@ -1,9 +1,11 @@
 import random
+from collections import Counter
 import json
 from typing import Dict, Any, Optional, TYPE_CHECKING
 from astrbot.api import logger
 
 # 导入仓储接口和领域模型
+from ..database.connection_manager import atomic_game_operation
 from ..repositories.abstract_repository import (
     AbstractUserRepository,
     AbstractLogRepository,
@@ -41,6 +43,7 @@ class GameMechanicsService:
         self.buff_repo = buff_repo
         self.config = config
 
+    @atomic_game_operation
     def steal_fish(self, thief_id: str, victim_id: str) -> Dict[str, Any]:
         """
         处理"偷鱼"的逻辑。
@@ -83,17 +86,17 @@ class GameMechanicsService:
             thief_id, "SHADOW_CLOAK_BUFF"
         )
         
-        if protection_buff:
-            if not penetration_buff and not shadow_cloak_buff:
-                return {"success": False, "message": f"❌ 无法偷窃，【{victim.nickname}】的鱼塘似乎被神秘力量守护着！"}
-            else:
-                if shadow_cloak_buff:
-                    self.buff_repo.delete(shadow_cloak_buff.id)
+        if protection_buff and not penetration_buff and not shadow_cloak_buff:
+            return {"success": False, "message": f"❌ 无法偷窃，【{victim.nickname}】的鱼塘似乎被神秘力量守护着！"}
 
         # 2. 检查受害者是否有鱼可偷
         victim_inventory = self.inventory_repo.get_fish_inventory(victim_id)
         if not victim_inventory:
             return {"success": False, "message": f"目标用户【{victim.nickname}】的鱼塘是空的！"}
+
+        pond_count = sum(f.quantity for f in self.inventory_repo.get_fish_inventory(thief_id))
+        if pond_count >= thief.fish_pond_capacity:
+            return {"success": False, "message": "你的鱼塘已满，无法放入偷到的鱼"}
 
         # 3. 随机选择一条鱼偷取
         stolen_fish_item = random.choice(victim_inventory)
@@ -101,6 +104,9 @@ class GameMechanicsService:
 
         if not stolen_fish_template:
             return {"success": False, "message": "发生内部错误，无法识别被偷的鱼"}
+
+        if protection_buff and shadow_cloak_buff and not penetration_buff:
+            self.buff_repo.delete(shadow_cloak_buff.id)
 
         # 4. 执行偷窃事务（保持品质属性）
         self.inventory_repo.update_fish_quantity(victim_id, stolen_fish_item.fish_id, delta=-1, quality_level=stolen_fish_item.quality_level)
@@ -133,6 +139,7 @@ class GameMechanicsService:
     # ============================================================
     # ==================== 新增功能：电鱼 开始 ====================
     # ============================================================
+    @atomic_game_operation
     def electric_fish(self, thief_id: str, victim_id: str) -> Dict[str, Any]:
         """
         处理"电鱼"的逻辑。
@@ -179,12 +186,8 @@ class GameMechanicsService:
             thief_id, "SHADOW_CLOAK_BUFF"
         )
         
-        if protection_buff:
-            if not penetration_buff and not shadow_cloak_buff:
-                return {"success": False, "message": f"❌ 无法电鱼，【{victim.nickname}】的鱼塘似乎被神秘力量守护着！"}
-            else:
-                if shadow_cloak_buff:
-                    self.buff_repo.delete(shadow_cloak_buff.id)
+        if protection_buff and not penetration_buff and not shadow_cloak_buff:
+            return {"success": False, "message": f"❌ 无法电鱼，【{victim.nickname}】的鱼塘似乎被神秘力量守护着！"}
     
         # 2. 检查受害者鱼塘数量是否达标
         victim_inventory = self.inventory_repo.get_fish_inventory(victim_id)
@@ -195,6 +198,14 @@ class GameMechanicsService:
         if total_fish_count < 100:
             return {"success": False, "message": f"目标用户【{victim.nickname}】的鱼塘里鱼太少了（{total_fish_count}/100），电不到什么好东西，还是放过他吧。"}
         
+        pond_count = sum(f.quantity for f in self.inventory_repo.get_fish_inventory(thief_id))
+        free_slots = thief.fish_pond_capacity - pond_count
+        if free_slots <= 0:
+            return {"success": False, "message": "你的鱼塘已满，无法接收电到的鱼"}
+
+        if protection_buff and shadow_cloak_buff and not penetration_buff:
+            self.buff_repo.delete(shadow_cloak_buff.id)
+
         # 3. 计算成功率并进行判定
         # 所有目标用户的成功率相同，只使用基础成功率
         final_success_rate = self.config.get("electric_fish", {}).get("base_success_rate", 0.6)
@@ -203,7 +214,7 @@ class GameMechanicsService:
         roll = random.random()
         
         # 失败处理
-        if roll > final_success_rate:
+        if roll >= final_success_rate:
             # 使用正态分布计算天罚百分比（0-max_rate之间）
             max_penalty_rate = self.config.get("electric_fish", {}).get("failure_penalty_max_rate", 0.5)
             
@@ -264,14 +275,14 @@ class GameMechanicsService:
             success_type = "🔹小成功"
             multiplier_range = (0.02, 0.05)
         
-        # 5. 准备数据：获取鱼模板并将鱼塘扁平化
         fish_templates = {
-            item.fish_id: self.item_template_repo.get_fish_by_id(item.fish_id)
-            for item in victim_inventory
+            fish_id: self.item_template_repo.get_fish_by_id(fish_id)
+            for fish_id in {fish.fish_id for fish in victim_inventory}
         }
-        all_fish_in_pond = []
-        for item in victim_inventory:
-            all_fish_in_pond.extend([item.fish_id] * item.quantity)
+        pond_counts = {
+            (fish.fish_id, fish.quality_level): fish.quantity
+            for fish in victim_inventory
+        }
 
         # 6. 决定偷取数量并进行初次完全随机抽样
         num_to_steal = 0
@@ -290,65 +301,35 @@ class GameMechanicsService:
                 num_to_steal = random.randint(3, 5)    # 小成功
 
         max_catch = self.config.get("electric_fish", {}).get("max_catch", ELECTRIC_FISH_MAX_CATCH)
-        num_to_steal = min(num_to_steal, max(1, int(max_catch)))
-        actual_num_to_steal = min(num_to_steal, len(all_fish_in_pond))
-        initial_catch = random.sample(all_fish_in_pond, actual_num_to_steal)
+        sample_size = min(num_to_steal, max(1, int(max_catch)), free_slots, total_fish_count)
+        sample = random.sample(list(pond_counts), sample_size, counts=list(pond_counts.values()))
 
-        # 7. 检查并修正高星鱼数量
-        high_rarity_caught = []
-        low_rarity_caught = []
-        for fish_id in initial_catch:
-            template = fish_templates.get(fish_id)
-            if template and template.rarity >= 5:
-                high_rarity_caught.append(fish_id)
-            else:
-                low_rarity_caught.append(fish_id)
-        
-        final_stolen_fish_ids = []
-        if len(high_rarity_caught) <= 1:
-            final_stolen_fish_ids = initial_catch
-        else:
-            random.shuffle(high_rarity_caught)
-            final_stolen_fish_ids.append(high_rarity_caught.pop(0))
-            final_stolen_fish_ids.extend(low_rarity_caught)
-            
-            num_to_replace = len(high_rarity_caught)
+        rare = [key for key in sample if fish_templates[key[0]].rarity >= 5]
+        if len(rare) > 1:
+            remaining = Counter(pond_counts)
+            remaining.subtract(sample)
+            replacements = {
+                key: count for key, count in remaining.items()
+                if count > 0 and fish_templates[key[0]].rarity < 5
+            }
+            replacements_needed = min(len(rare) - 1, sum(replacements.values()))
+            sample = [key for key in sample if fish_templates[key[0]].rarity < 5]
+            sample.append(random.choice(rare))
+            if replacements_needed:
+                sample.extend(random.sample(
+                    list(replacements), replacements_needed, counts=list(replacements.values()),
+                ))
 
-            from collections import Counter
-            pond_counts = Counter(all_fish_in_pond)
-            initial_catch_counts = Counter(initial_catch)
-            pond_counts.subtract(initial_catch_counts)
-
-            replacement_pool = []
-            for fish_id, count in pond_counts.items():
-                if count > 0:
-                    template = fish_templates.get(fish_id)
-                    if template and template.rarity < 5:
-                        replacement_pool.extend([fish_id] * count)
-            
-            if replacement_pool:
-                num_can_replace = min(num_to_replace, len(replacement_pool))
-                replacements = random.sample(replacement_pool, num_can_replace)
-                final_stolen_fish_ids.extend(replacements)
-
-        # 8. 统计最终偷到的鱼
-        stolen_fish_counts = {}
-        for fish_id in final_stolen_fish_ids:
-            stolen_fish_counts[fish_id] = stolen_fish_counts.get(fish_id, 0) + 1
-    
-        # 9. 执行电鱼事务并计算总价值
         stolen_summary = []
         total_value_stolen = 0
-    
-        for fish_id, count in stolen_fish_counts.items():
-            self.inventory_repo.update_fish_quantity(victim_id, fish_id, delta=-count, quality_level=0)
-            self.inventory_repo.add_fish_to_inventory(thief_id, fish_id, quantity=count, quality_level=0)
-            
-            template = fish_templates.get(fish_id)
-            if template:
-                stolen_summary.append(f"【{template.name}】x{count}")
-                total_value_stolen += template.base_value * count
-    
+        for (fish_id, quality), count in Counter(sample).items():
+            self.inventory_repo.update_fish_quantity(victim_id, fish_id, delta=-count, quality_level=quality)
+            self.inventory_repo.add_fish_to_inventory(thief_id, fish_id, quantity=count, quality_level=quality)
+            template = fish_templates[fish_id]
+            label = " ✨高品质" if quality else ""
+            stolen_summary.append(f"【{template.name}{label}】×{count}")
+            total_value_stolen += template.base_value * (1 + quality) * count
+
         # 10. 更新电鱼的CD时间并保存
         thief.last_electric_fish_time = now
         self.user_repo.update(thief)
@@ -362,7 +343,7 @@ class GameMechanicsService:
                 counter_message = "🌑 暗影斗篷让你在阴影中行动！\n"
     
         stolen_details = "、".join(stolen_summary)
-        actual_stolen_count = len(final_stolen_fish_ids)
+        actual_stolen_count = len(sample)
         
         # 计算收益占比
         steal_percentage = (actual_stolen_count / total_fish_count) * 100
@@ -375,6 +356,7 @@ class GameMechanicsService:
     # ===================== 新增功能：电鱼 结束 =====================
     # ============================================================
 
+    @atomic_game_operation
     def dispel_steal_protection(self, target_id: str) -> Dict[str, Any]:
         """
         驱散目标的海灵守护效果

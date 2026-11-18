@@ -1,12 +1,12 @@
 import dataclasses
 import sqlite3
-import threading
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 from astrbot.api import logger
 
 from ..domain.models import User
+from ..database.connection_manager import DatabaseConnectionManager
 from .abstract_repository import AbstractUserRepository
 
 # 累计类字段按增量写回，和其他线程的原子更新（如自动钓鱼扣费）叠加，而不是互相覆盖
@@ -22,30 +22,12 @@ def _snapshot(user: User) -> Dict[str, Any]:
 class SqliteUserRepository(AbstractUserRepository):
     """用户数据仓储的SQLite实现"""
 
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, connection_manager: DatabaseConnectionManager | None = None):
         self.db_path = db_path
-        self._local = threading.local()
-
-    def _get_connection(self) -> sqlite3.Connection:
-        conn = getattr(self._local, "connection", None)
-        if conn is None:
-            conn = sqlite3.connect(self.db_path, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA foreign_keys = ON;")
-            self._local.connection = conn
-        return conn
+        self._connection_manager = connection_manager or DatabaseConnectionManager(db_path)
 
     def close_connection(self) -> None:
-        """关闭当前线程的连接，退出后台任务时释放线程资源。"""
-        conn = getattr(self._local, "connection", None)
-        if conn is None:
-            return
-        try:
-            if conn.in_transaction:
-                conn.rollback()
-            conn.close()
-        finally:
-            delattr(self._local, "connection")
+        self._connection_manager.close_connection()
 
     def _row_to_user(self, row: sqlite3.Row) -> Optional[User]:
         """
@@ -104,14 +86,14 @@ class SqliteUserRepository(AbstractUserRepository):
         return user
 
     def get_by_id(self, user_id: str) -> Optional[User]:
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
             row = cursor.fetchone()
             return self._row_to_user(row)
 
     def check_exists(self, user_id: str) -> bool:
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT 1 FROM users WHERE user_id = ?", (user_id,))
             return cursor.fetchone() is not None
@@ -125,10 +107,9 @@ class SqliteUserRepository(AbstractUserRepository):
 
         sql = f"INSERT INTO users ({columns_clause}) VALUES ({placeholders_clause})"
 
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(sql, tuple(values))
-            conn.commit()
 
     def update(self, user: User) -> None:
         """
@@ -153,14 +134,12 @@ class SqliteUserRepository(AbstractUserRepository):
         sql = f"UPDATE users SET {set_clause} WHERE user_id = ?"
 
         try:
-            with self._get_connection() as conn:
+            with self._connection_manager.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(sql, tuple(values))
                 if cursor.rowcount == 0:
                     logger.warning(f"尝试更新不存在的用户 {user.user_id}，将转为添加操作。")
                     self.add(user) # 如果更新失败（比如用户不存在），则尝试添加
-                else:
-                    conn.commit()
         except sqlite3.Error as e:
             logger.error(f"更新用户 {user.user_id} 数据时发生数据库错误: {e}")
             raise
@@ -190,7 +169,7 @@ class SqliteUserRepository(AbstractUserRepository):
         if not sets:
             return
         try:
-            with self._get_connection() as conn:
+            with self._connection_manager.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(f"UPDATE users SET {', '.join(sets)} WHERE user_id = ?", (*values, user.user_id))
                 if cursor.rowcount == 0:
@@ -201,7 +180,6 @@ class SqliteUserRepository(AbstractUserRepository):
                 row = cursor.execute(
                     f"SELECT {', '.join(COUNTER_FIELDS)}, max_coins FROM users WHERE user_id = ?", (user.user_id,)
                 ).fetchone()
-                conn.commit()
         except sqlite3.Error as e:
             logger.error(f"更新用户 {user.user_id} 数据时发生数据库错误: {e}")
             raise
@@ -213,7 +191,7 @@ class SqliteUserRepository(AbstractUserRepository):
 
     def toggle_auto_fishing(self, user_id: str) -> Optional[bool]:
         """原子切换自动钓鱼状态并返回新状态。"""
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
@@ -225,24 +203,22 @@ class SqliteUserRepository(AbstractUserRepository):
                 (user_id,),
             )
             row = cursor.fetchone()
-            conn.commit()
             return bool(row[0]) if row else None
 
     def set_auto_fishing_enabled(self, user_id: str, enabled: bool) -> bool:
         """原子设置自动钓鱼状态。"""
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "UPDATE users SET auto_fishing_enabled = ? WHERE user_id = ?",
                 (1 if enabled else 0, user_id),
             )
             updated = cursor.rowcount == 1
-            conn.commit()
             return updated
 
     def record_failed_fishing(self, user_id: str, cost: int, timestamp: datetime) -> bool:
         """仅更新失败钓鱼所需字段，避免整行旧数据回写。"""
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
@@ -253,71 +229,62 @@ class SqliteUserRepository(AbstractUserRepository):
                 (cost, timestamp, user_id, cost),
             )
             updated = cursor.rowcount == 1
-            conn.commit()
             return updated
 
     def update_bait_state(
         self, user_id: str, bait_id: Optional[int], bait_start_time: Optional[datetime]
     ) -> bool:
         """只保存当前鱼饵状态。"""
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "UPDATE users SET current_bait_id = ?, bait_start_time = ? WHERE user_id = ?",
                 (bait_id, bait_start_time, user_id),
             )
             updated = cursor.rowcount == 1
-            conn.commit()
             return updated
 
     def set_fishing_zone(self, user_id: str, zone_id: int) -> bool:
         """只更新用户所在钓鱼区域。"""
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "UPDATE users SET fishing_zone_id = ? WHERE user_id = ?",
                 (zone_id, user_id),
             )
             updated = cursor.rowcount == 1
-            conn.commit()
             return updated
 
     def deduct_coins_up_to(self, user_id: str, amount: int) -> tuple[int, int]:
         """在一个事务内最多扣除指定金币，返回实际扣除额和余额。"""
         amount = max(int(amount), 0)
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("BEGIN IMMEDIATE")
-            try:
-                cursor.execute("SELECT coins FROM users WHERE user_id = ?", (user_id,))
-                row = cursor.fetchone()
-                if row is None:
-                    conn.rollback()
-                    return 0, 0
-                balance = int(row[0])
-                deducted = min(amount, balance)
-                new_balance = balance - deducted
-                cursor.execute(
-                    "UPDATE users SET coins = ? WHERE user_id = ?",
-                    (new_balance, user_id),
-                )
-                conn.commit()
-                return deducted, new_balance
-            except Exception:
-                conn.rollback()
-                raise
+        with self._connection_manager.transaction() as cursor:
+            cursor.execute("SELECT coins FROM users WHERE user_id = ?", (user_id,))
+            row = cursor.fetchone()
+            if row is None:
+
+                return 0, 0
+            balance = int(row[0])
+            deducted = min(amount, balance)
+            new_balance = balance - deducted
+            cursor.execute(
+                "UPDATE users SET coins = ? WHERE user_id = ?",
+                (new_balance, user_id),
+            )
+
+            return deducted, new_balance
 
     def get_all_user_ids(self, auto_fishing_only: bool = False) -> List[str]:
         query = "SELECT user_id FROM users"
         if auto_fishing_only:
             query += " WHERE auto_fishing_enabled = 1"
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(query)
             return [row["user_id"] for row in cursor.fetchall()]
 
     def _get_top_users_base_query(self, order_by_column: str, limit: int) -> List[User]:
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             if order_by_column not in ["total_fishing_count", "coins", "total_weight_caught", "max_coins"]:
                 raise ValueError("Invalid order by column")
@@ -340,26 +307,26 @@ class SqliteUserRepository(AbstractUserRepository):
         return self._get_top_users_base_query("total_weight_caught", limit)
 
     def get_high_value_users(self, threshold: int) -> List[User]:
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM users WHERE coins >= ?", (threshold,))
             return [self._row_to_user(row) for row in cursor.fetchall()]
     
     # 其他辅助方法保持不变...
     def get_all_users(self, limit: int = 100, offset: int = 0) -> List[User]:
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?", (limit, offset))
             return [self._row_to_user(row) for row in cursor.fetchall()]
 
     def get_users_count(self) -> int:
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT COUNT(*) FROM users")
             return cursor.fetchone()[0]
 
     def search_users(self, keyword: str, limit: int = 50, offset: int = 0) -> List[User]:
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT * FROM users 
@@ -370,7 +337,7 @@ class SqliteUserRepository(AbstractUserRepository):
             return [self._row_to_user(row) for row in cursor.fetchall()]
 
     def get_search_users_count(self, keyword: str) -> int:
-        with self._get_connection() as conn:
+        with self._connection_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT COUNT(*) FROM users WHERE user_id LIKE ? OR nickname LIKE ?",
@@ -379,12 +346,22 @@ class SqliteUserRepository(AbstractUserRepository):
             return cursor.fetchone()[0]
 
     def delete_user(self, user_id: str) -> bool:
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            try:
+        try:
+            with self._connection_manager.transaction() as cursor:
+                if not cursor.execute("SELECT 1 FROM users WHERE user_id = ?", (user_id,)).fetchone():
+                    return False
+                for table, instance_id, kind in (
+                    ("user_rods", "rod_instance_id", "rod"),
+                    ("user_accessories", "accessory_instance_id", "accessory"),
+                ):
+                    cursor.execute(f"""
+                        DELETE FROM {table}
+                        WHERE user_id = 'MARKET' AND {instance_id} IN (
+                            SELECT item_instance_id FROM market WHERE user_id = ? AND item_type = ?
+                        )
+                    """, (user_id, kind))
+                cursor.execute("DELETE FROM market WHERE user_id = ?", (user_id,))
                 cursor.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
-                conn.commit()
                 return cursor.rowcount > 0
-            except sqlite3.Error:
-                conn.rollback()
-                return False
+        except sqlite3.Error:
+            return False

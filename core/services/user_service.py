@@ -1,8 +1,10 @@
 import random
 from typing import Dict, Any, Optional
 from datetime import timedelta
+from astrbot.api import logger
 
 # 导入仓储接口和领域模型
+from ..database.connection_manager import atomic_game_operation
 from ..repositories.abstract_repository import (
     AbstractUserRepository,
     AbstractLogRepository,
@@ -46,6 +48,7 @@ class UserService:
         self.gacha_service = gacha_service
         self.config = config
 
+    @atomic_game_operation
     def register(self, user_id: str, nickname: str) -> Dict[str, Any]:
         """
         注册新用户。
@@ -164,6 +167,7 @@ class UserService:
             "leaderboard": leaderboard
         }
 
+    @atomic_game_operation
     def daily_sign_in(self, user_id: str) -> Dict[str, Any]:
         """
         处理用户每日签到。
@@ -210,7 +214,11 @@ class UserService:
         free_pool = self.gacha_service.get_daily_free_pool()
         # 每日补给池没有内容时不抽，也不提示
         if free_pool and self.gacha_service.gacha_repo.get_pool_items(free_pool.gacha_pool_id):
-            gacha_result = self.gacha_service.perform_draw(user.user_id, free_pool.gacha_pool_id, 1)
+            try:
+                gacha_result = self.gacha_service.perform_draw(user.user_id, free_pool.gacha_pool_id, 1)
+            except Exception:
+                logger.exception("每日补给发放失败")
+                gacha_result = {"success": False, "message": "每日补给暂时未能领取，请稍后重试抽卡"}
             if gacha_result.get("success"):
                 reward = gacha_result.get("results", [])[0]
                 reward_name = reward.get("name", "神秘奖励")
@@ -270,6 +278,7 @@ class UserService:
             "message": f"金币数量已更新，当前金币：{user.coins}"
         }
 
+    @atomic_game_operation
     def transfer_coins(self, from_user_id: str, to_user_id: str, amount: int) -> Dict[str, Any]:
         """
         用户之间转账金币。
@@ -509,6 +518,8 @@ class UserService:
         Returns:
             包含操作结果的字典
         """
+        if user_id == "MARKET":
+            return {"success": False, "message": "市场托管账号不能删除"}
         if not self.user_repo.check_exists(user_id):
             return {"success": False, "message": "用户不存在"}
         success = self.user_repo.delete_user(user_id)
