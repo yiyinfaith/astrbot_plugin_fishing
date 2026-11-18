@@ -123,6 +123,27 @@ class AdminApiTests(unittest.TestCase):
         self.assertTrue(all(r.startswith("/astrbot_plugin_fishing/") for r in routes))
         self.assertEqual(len(routes), len(set(routes)))
 
+    def test_reload_replaces_only_this_plugins_admin_routes(self):
+        from unittest.mock import patch
+
+        from astrbot.api import AstrBotConfig
+        from astrbot.api.star import Context, StarTools
+
+        context = Context()
+        obsolete = "/astrbot_plugin_fishing/titles"
+        unrelated = "/another_plugin/overview"
+        context.register_web_api(obsolete, object(), ["GET"], "")
+        context.register_web_api(unrelated, object(), ["GET"], "")
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory, patch.object(StarTools, "_root", Path(directory)):
+            plugin = type(self.plugin)(context, AstrBotConfig({}))
+            try:
+                routes = {route[0] for route in context.registered_web_apis}
+                self.assertNotIn(obsolete, routes)
+                self.assertIn(unrelated, routes)
+                self.assertIn("/astrbot_plugin_fishing/overview", routes)
+            finally:
+                run(plugin.terminate())
+
     def test_fresh_database_has_gacha_items_and_no_wipe_bomb_content(self):
         pools = self.call(self.api.gacha_list)["rows"]
         self.assertGreater(sum(p["item_count"] for p in pools), 0)

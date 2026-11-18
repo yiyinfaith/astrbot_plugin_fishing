@@ -247,6 +247,11 @@ class FishingPlugin(Star):
 
         # --- AstrBot 面板内嵌管理页的后端接口 ---
         self.admin_api = FishingAdminAPI(self)
+        # AstrBot 热重载时会保留已注册接口，先清理本插件的旧路由。
+        route_prefix = f"/{self.plugin_id}/"
+        context.registered_web_apis[:] = [
+            api for api in context.registered_web_apis if not api[0].startswith(route_prefix)
+        ]
         self.admin_api.register(self.context, PLUGIN_NAME)
 
     async def _guard(self, event: AstrMessageEvent, results):
